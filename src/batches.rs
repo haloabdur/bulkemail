@@ -100,14 +100,14 @@ pub async fn create(state: &AppState, nb: NewBatch<'_>) -> Result<Created, ApiEr
             format!("SPF/DKIM domain {from_domain} belum terverifikasi"),
         ));
     }
-    if let Some(key) = nb.api_key {
-        if key.domain_id.is_some_and(|d| d != domain.id) {
-            return Err(ApiError::new(
-                axum::http::StatusCode::FORBIDDEN,
-                "domain_not_allowed",
-                format!("API key ini tidak boleh mengirim dari {from_domain}"),
-            ));
-        }
+    if let Some(key) = nb.api_key
+        && key.domain_id.is_some_and(|d| d != domain.id)
+    {
+        return Err(ApiError::new(
+            axum::http::StatusCode::FORBIDDEN,
+            "domain_not_allowed",
+            format!("API key ini tidak boleh mengirim dari {from_domain}"),
+        ));
     }
     let reply_to = match non_empty(nb.reply_to) {
         Some(r) => Some(
@@ -185,24 +185,22 @@ pub async fn create(state: &AppState, nb: NewBatch<'_>) -> Result<Created, ApiEr
         ));
     }
 
-    if let Some(key) = nb.api_key {
-        if let Some(limit) = key.daily_limit {
-            let used: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(SUM(total), 0) FROM batches WHERE api_key_id = ? AND created_at > ?",
-            )
-            .bind(key.id)
-            .bind(now() - 86_400)
-            .fetch_one(&state.db)
-            .await?;
-            if used + accepted.len() as i64 > limit {
-                return Err(ApiError::new(
-                    axum::http::StatusCode::TOO_MANY_REQUESTS,
-                    "daily_limit",
-                    format!(
-                        "Batas harian {limit} email untuk key ini terlampaui (terpakai {used})"
-                    ),
-                ));
-            }
+    if let Some(key) = nb.api_key
+        && let Some(limit) = key.daily_limit
+    {
+        let used: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(total), 0) FROM batches WHERE api_key_id = ? AND created_at > ?",
+        )
+        .bind(key.id)
+        .bind(now() - 86_400)
+        .fetch_one(&state.db)
+        .await?;
+        if used + accepted.len() as i64 > limit {
+            return Err(ApiError::new(
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "daily_limit",
+                format!("Batas harian {limit} email untuk key ini terlampaui (terpakai {used})"),
+            ));
         }
     }
 

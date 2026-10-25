@@ -290,6 +290,10 @@ async fn dashboard_requires_login_and_renders_every_page() {
         ("/api-keys", "API keys"),
         ("/settings", "Stalwart"),
         ("/suppressions", "Daftar unsubscribe"),
+        ("/domains", "Domain terdaftar"),
+        ("/domains/1", "Record DNS"),
+        ("/domains/1?via=manual", "File zona"),
+        ("/domains/1?via=cloudflare", "Hubungkan Cloudflare"),
     ] {
         let req = Request::get(path)
             .header(header::COOKIE, &cookie)

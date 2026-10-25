@@ -152,18 +152,18 @@ async fn send_one(
         // Every bulk email must have a visible unsubscribe link; add one if the template has none.
         let has_link =
             |t: &Option<String>| t.as_deref().is_some_and(|t| t.contains("unsubscribe_url"));
-        if !has_link(&batch.html) {
-            if let Some(h) = html.as_mut() {
-                h.push_str(&format!(
+        if !has_link(&batch.html)
+            && let Some(h) = html.as_mut()
+        {
+            h.push_str(&format!(
                     "<p style=\"font-size:12px;color:#666\"><a href=\"{}\">Berhenti berlangganan</a></p>",
                     html_escape::encode_double_quoted_attribute(url)
                 ));
-            }
         }
-        if !has_link(&batch.text) {
-            if let Some(t) = text.as_mut() {
-                t.push_str(&format!("\n\n--\nBerhenti berlangganan: {url}\n"));
-            }
+        if !has_link(&batch.text)
+            && let Some(t) = text.as_mut()
+        {
+            t.push_str(&format!("\n\n--\nBerhenti berlangganan: {url}\n"));
         }
     }
     let message_id = format!("<{}.{}.{}@{}>", batch.id, rid, random_alnum(8), domain);

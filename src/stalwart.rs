@@ -16,13 +16,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DnsRecord {
     #[serde(rename = "type")]
     pub kind: String,
     pub name: String,
     #[serde(alias = "content")]
     pub value: String,
+    /// "spf", "dkim", "dmarc" (needed to send) or "receive" (only for receiving mail).
+    #[serde(default)]
+    pub purpose: String,
+    /// Result of the last DNS check, for records BatchMail verifies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<bool>,
 }
 
 pub struct Stalwart {
@@ -143,23 +149,6 @@ fn describe_error(err: &Value, body: &Value) -> String {
 fn is_already_exists(e: &anyhow::Error) -> bool {
     let s = e.to_string();
     s.contains("AlreadyExists") || s.contains("alreadyExists") || s.contains("already exists")
-}
-
-/// Records to publish when the Stalwart management API is not configured.
-/// DKIM then has to be set up in Stalwart by hand (Settings › Signatures).
-pub fn fallback_records(domain: &str, smtp_host: &str) -> Vec<DnsRecord> {
-    vec![
-        DnsRecord {
-            kind: "TXT".into(),
-            name: format!("{domain}."),
-            value: format!("v=spf1 a:{smtp_host} mx ~all"),
-        },
-        DnsRecord {
-            kind: "TXT".into(),
-            name: format!("_dmarc.{domain}."),
-            value: format!("v=DMARC1; p=none; rua=mailto:postmaster@{domain}"),
-        },
-    ]
 }
 
 #[cfg(test)]

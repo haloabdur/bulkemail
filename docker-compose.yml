@@ -1,0 +1,39 @@
+# Stalwart + BatchMail on one server.
+# 1. cp .env.example .env  and fill it in
+# 2. docker compose up -d
+# 3. Open Stalwart's admin at http://SERVER:8081 (see README › Menyiapkan Stalwart)
+# 4. Put BatchMail behind HTTPS (README › Reverse proxy) and open it.
+
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:latest
+    container_name: stalwart
+    restart: unless-stopped
+    hostname: ${MAIL_HOSTNAME:-mail.domainanda.id}
+    ports:
+      - "25:25"     # SMTP (receiving mail / bounces)
+      - "587:587"   # Submission (STARTTLS) — what BatchMail uses
+      - "465:465"   # Submission (implicit TLS)
+      - "443:443"   # HTTPS: admin, management API, ACME
+      - "8081:8080" # HTTP admin (bind to localhost or firewall it in production)
+    volumes:
+      - stalwart-data:/opt/stalwart
+
+  batchmail:
+    build: .
+    container_name: batchmail
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:///data/batchmail.db
+      BIND_ADDR: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8080:8080" # publish through your reverse proxy
+    volumes:
+      - batchmail-data:/data
+    depends_on:
+      - stalwart
+
+volumes:
+  stalwart-data:
+  batchmail-data:

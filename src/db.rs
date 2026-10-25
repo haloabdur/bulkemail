@@ -6,17 +6,16 @@ use std::time::Duration;
 
 pub async fn connect(url: &str) -> Result<SqlitePool> {
     let in_memory = url.contains(":memory:");
-    if !in_memory {
-        if let Some(path) = url
+    if !in_memory
+        && let Some(path) = url
             .strip_prefix("sqlite://")
             .or_else(|| url.strip_prefix("sqlite:"))
+    {
+        let path = path.split('?').next().unwrap_or(path);
+        if let Some(dir) = std::path::Path::new(path).parent()
+            && !dir.as_os_str().is_empty()
         {
-            let path = path.split('?').next().unwrap_or(path);
-            if let Some(dir) = std::path::Path::new(path).parent() {
-                if !dir.as_os_str().is_empty() {
-                    std::fs::create_dir_all(dir)?;
-                }
-            }
+            std::fs::create_dir_all(dir)?;
         }
     }
     let mut opts = SqliteConnectOptions::from_str(url)?

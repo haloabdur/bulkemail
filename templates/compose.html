@@ -12,7 +12,7 @@
 {% if let Some(e) = error %}<div class="notice error" role="alert">{{ e }}</div>{% endif %}
 {% if let Some(i) = info %}<div class="notice" role="status">{{ i }}</div>{% endif %}
 {% if domains.is_empty() %}
-<div class="notice error">Belum ada domain pengirim yang terverifikasi. <a href="/settings">Tambahkan dan verifikasi domain</a> dulu.</div>
+<div class="notice error">Belum ada domain pengirim yang terverifikasi. <a href="/domains">Tambahkan dan verifikasi domain</a> dulu.</div>
 {% endif %}
 
 <form method="post" action="/batches" enctype="multipart/form-data" class="row">

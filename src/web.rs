@@ -6,7 +6,6 @@ use crate::batches::{self, Batch, Kind, NewBatch, RecipientInput};
 use crate::domains::{self, Domain};
 use crate::error::PageResult;
 use crate::mailer::Outcome;
-use crate::stalwart::DnsRecord;
 use crate::unsubscribe;
 use crate::util::{fmt_num, fmt_opt_time, fmt_time, mask_email, now, parse_local_datetime};
 use crate::worker;
@@ -18,7 +17,6 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
-use serde_json::Map;
 use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
@@ -36,8 +34,6 @@ pub fn router() -> Router<AppState> {
         .route("/api-keys/{id}/revoke", post(key_revoke))
         .route("/settings", get(settings_page))
         .route("/settings/test-smtp", post(test_smtp))
-        .route("/domains", post(domain_add))
-        .route("/domains/{id}/{action}", post(domain_action))
         .route(
             "/suppressions",
             get(suppressions_page).post(suppression_add),
@@ -47,7 +43,7 @@ pub fn router() -> Router<AppState> {
         .route("/u/{token}/resubscribe", post(resubscribe))
 }
 
-fn render<T: Template>(t: T) -> PageResult {
+pub(crate) fn render<T: Template>(t: T) -> PageResult {
     Ok(Html(t.render()?).into_response())
 }
 
@@ -60,12 +56,12 @@ async fn css() -> Response {
 }
 
 #[derive(Deserialize, Default)]
-struct MsgQuery {
-    msg: Option<String>,
+pub(crate) struct MsgQuery {
+    pub(crate) msg: Option<String>,
 }
 
 /// Fixed notices for redirects (`?msg=code`), so no user text is reflected.
-fn notice(code: Option<&str>) -> Option<String> {
+pub(crate) fn notice(code: Option<&str>) -> Option<String> {
     let text = match code? {
         "paused" => "Batch dijeda.",
         "resumed" => "Batch dilanjutkan.",
@@ -74,11 +70,17 @@ fn notice(code: Option<&str>) -> Option<String> {
         "not_cancellable" => "Batch ini sudah selesai dan tidak bisa dibatalkan.",
         "revoked" => "API key dicabut. Sistem yang memakainya tidak bisa mengirim lagi.",
         "domain_added" => {
-            "Domain ditambahkan. Pasang record DNS di bawah, lalu klik Periksa ulang."
+            "Domain ditambahkan. Pasang record DNS di bawah (manual atau lewat Cloudflare), lalu periksa ulang."
         }
         "domain_checked" => "DNS sudah diperiksa ulang.",
         "domain_synced" => "Record DNS diambil ulang dari Stalwart.",
         "domain_removed" => "Domain dihapus.",
+        "cf_connected" => {
+            "Cloudflare terhubung. Klik Pratinjau untuk melihat perubahan sebelum diterapkan."
+        }
+        "cf_disconnected" => {
+            "Cloudflare diputus. Record yang sudah dibuat tetap ada di Cloudflare."
+        }
         "suppressed" => "Alamat ditambahkan ke daftar unsubscribe.",
         "unsuppressed" => "Alamat dihapus dari daftar unsubscribe.",
         _ => return None,
@@ -86,7 +88,7 @@ fn notice(code: Option<&str>) -> Option<String> {
     Some(text.to_string())
 }
 
-fn redirect_msg(path: &str, code: &str) -> Response {
+pub(crate) fn redirect_msg(path: &str, code: &str) -> Response {
     Redirect::to(&format!("{path}?msg={code}")).into_response()
 }
 
@@ -498,7 +500,7 @@ async fn batch_create(
         let vars = recipients
             .first()
             .map(|r| r.vars.clone())
-            .unwrap_or_else(Map::new);
+            .unwrap_or_default();
         let preview = Batch {
             id: String::new(),
             name: String::new(),
@@ -988,20 +990,7 @@ async fn key_revoke(State(state): State<AppState>, _user: User, Path(id): Path<i
     Ok(redirect_msg("/api-keys", "revoked"))
 }
 
-// ---------- settings & domains ----------
-
-struct DomainView {
-    id: i64,
-    name: String,
-    spf: bool,
-    dkim: bool,
-    dmarc: bool,
-    verified: bool,
-    synced: bool,
-    error: String,
-    checked: String,
-    records: Vec<DnsRecord>,
-}
+// ---------- settings ----------
 
 #[derive(Template)]
 #[template(path = "settings.html")]
@@ -1016,7 +1005,8 @@ struct SettingsPage {
     stalwart_url: String,
     stalwart_status: String,
     stalwart_ok: bool,
-    domains: Vec<DomainView>,
+    domain_count: usize,
+    domains_pending: usize,
     allow_unverified: bool,
 }
 
@@ -1034,22 +1024,7 @@ async fn settings_view(state: &AppState, user: &User) -> PageResult<SettingsPage
             Err(e) => (format!("Gagal: {e:#}"), false),
         },
     };
-    let domains = domains::list(state)
-        .await?
-        .into_iter()
-        .map(|d| DomainView {
-            id: d.id,
-            verified: d.verified(),
-            records: d.records(),
-            spf: d.spf_ok,
-            dkim: d.dkim_ok,
-            dmarc: d.dmarc_ok,
-            synced: d.stalwart_synced,
-            error: d.last_error.clone().unwrap_or_default(),
-            checked: fmt_opt_time(d.checked_at, state.cfg.tz_offset_hours),
-            name: d.name,
-        })
-        .collect();
+    let domain_list = domains::list(state).await?;
     Ok(SettingsPage {
         nav: "settings",
         user: user.email.clone(),
@@ -1069,7 +1044,8 @@ async fn settings_view(state: &AppState, user: &User) -> PageResult<SettingsPage
             .unwrap_or_else(|| "—".into()),
         stalwart_status,
         stalwart_ok,
-        domains,
+        domain_count: domain_list.len(),
+        domains_pending: domain_list.iter().filter(|d| !d.verified()).count(),
         allow_unverified: state.cfg.allow_unverified_domains,
     })
 }
@@ -1091,55 +1067,6 @@ async fn test_smtp(State(state): State<AppState>, user: User) -> PageResult {
         Err(e) => (false, format!("Koneksi gagal: {e}")),
     });
     render(page)
-}
-
-#[derive(Deserialize)]
-struct DomainForm {
-    name: String,
-    dkim_selector: Option<String>,
-}
-
-async fn domain_add(
-    State(state): State<AppState>,
-    user: User,
-    Form(f): Form<DomainForm>,
-) -> PageResult {
-    match domains::add(&state, &f.name, f.dkim_selector.as_deref()).await {
-        Ok(_) => Ok(redirect_msg("/settings", "domain_added")),
-        Err(e) => {
-            let mut page = settings_view(&state, &user).await?;
-            page.error = Some(e.to_string());
-            render(page)
-        }
-    }
-}
-
-async fn domain_action(
-    State(state): State<AppState>,
-    _user: User,
-    Path((id, action)): Path<(i64, String)>,
-) -> PageResult {
-    let Some(domain) = domains::get(&state, id).await? else {
-        return Ok(StatusCode::NOT_FOUND.into_response());
-    };
-    let code = match action.as_str() {
-        "verify" => {
-            domains::verify(&state, &domain).await?;
-            "domain_checked"
-        }
-        "sync" => {
-            domains::sync_with_stalwart(&state, id, None).await?;
-            let domain = domains::get(&state, id).await?.expect("exists");
-            domains::verify(&state, &domain).await?;
-            "domain_synced"
-        }
-        "delete" => {
-            domains::remove(&state, id).await?;
-            "domain_removed"
-        }
-        _ => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    Ok(redirect_msg("/settings", code))
 }
 
 // ---------- suppression list ----------

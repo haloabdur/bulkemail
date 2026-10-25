@@ -4,15 +4,14 @@ use crate::stalwart::DnsRecord;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct DomainCheck {
-    pub spf: bool,
-    pub dkim: bool,
-    pub dmarc: bool,
-}
-
 pub struct Verifier {
     resolver: TokioAsyncResolver,
+}
+
+impl Default for Verifier {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Verifier {
@@ -27,7 +26,7 @@ impl Verifier {
         Verifier { resolver }
     }
 
-    async fn txt(&self, name: &str) -> Vec<String> {
+    pub async fn txt(&self, name: &str) -> Vec<String> {
         match self.resolver.txt_lookup(name).await {
             Ok(lookup) => lookup
                 .iter()
@@ -41,30 +40,13 @@ impl Verifier {
             Err(_) => Vec::new(),
         }
     }
-
-    pub async fn check(&self, domain: &str, expected: &[DnsRecord]) -> DomainCheck {
-        let spf = self.txt(&format!("{domain}.")).await;
-        let dmarc = self.txt(&format!("_dmarc.{domain}.")).await;
-        let mut dkim = false;
-        for rec in expected.iter().filter(|r| is_dkim_record(r)) {
-            if dkim_matches(&rec.value, &self.txt(&rec.name).await) {
-                dkim = true;
-                break;
-            }
-        }
-        DomainCheck {
-            spf: has_prefix(&spf, "v=spf1"),
-            dkim,
-            dmarc: has_prefix(&dmarc, "v=dmarc1"),
-        }
-    }
 }
 
 pub fn is_dkim_record(r: &DnsRecord) -> bool {
     r.kind.eq_ignore_ascii_case("TXT") && r.name.contains("._domainkey.")
 }
 
-fn has_prefix(txts: &[String], prefix: &str) -> bool {
+pub fn has_prefix(txts: &[String], prefix: &str) -> bool {
     txts.iter()
         .any(|t| t.trim().to_ascii_lowercase().starts_with(prefix))
 }

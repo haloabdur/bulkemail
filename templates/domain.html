@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <a href="/domains" style="font-size:13px;text-decoration:none">← Domain &amp; DNS</a>
+    <div class="actions" style="gap:12px"><h1>{{ name }}</h1><span class="pill {{ status_class }}">{{ status }}</span></div>
+    <p class="muted">SPF {% if spf %}lolos{% else %}belum{% endif %} · DKIM {% if dkim %}lolos{% else %}belum{% endif %} · DMARC {% if dmarc %}lolos{% else %}belum (disarankan){% endif %} · diperiksa {{ checked }}{% if stalwart_synced %} · kunci DKIM dari Stalwart{% endif %}</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/domains/{{ id }}/verify"><button class="btn" type="submit">Periksa ulang DNS</button></form>
+    {% if stalwart_api %}<form method="post" action="/domains/{{ id }}/sync"><button class="btn" type="submit">Ambil ulang dari Stalwart</button></form>{% endif %}
+    <form method="post" action="/domains/{{ id }}/delete" onsubmit="return confirm('Hapus domain ini dari BatchMail? Domain di Stalwart dan record DNS tidak ikut dihapus.')"><button class="btn danger" type="submit">Hapus</button></form>
+  </div>
+</header>
+
+{% if let Some(n) = notice %}<div class="notice" role="status">{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<div class="notice error" role="alert">{{ e }}</div>{% endif %}
+{% if !stalwart_error.is_empty() %}<div class="notice error">Stalwart belum bisa menyiapkan domain ini: {{ stalwart_error }}. Record di bawah memakai placeholder DKIM; perbaiki koneksi lalu klik Ambil ulang dari Stalwart.</div>{% endif %}
+
+<section class="card flush" aria-labelledby="rec-h">
+  <div class="card-head">
+    <div class="stack" style="gap:2px">
+      <h2 id="rec-h">Record DNS</h2>
+      <span class="muted" style="font-size:13px">SPF dan DKIM wajib lolos sebelum domain bisa dipakai mengirim. DMARC sangat disarankan (Gmail &amp; Yahoo mewajibkannya untuk pengirim massal).</span>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table style="min-width:900px">
+      <thead><tr><th>Fungsi</th><th>Tipe</th><th>Nama</th><th>Nilai</th><th>Status</th><th><span class="sr-only">Salin</span></th></tr></thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td>{% if r.required %}<b style="font-weight:500">{{ r.purpose }}</b>{% else %}<span class="muted">{{ r.purpose }}</span>{% endif %}</td>
+          <td class="mono">{{ r.kind }}</td>
+          <td class="mono wrap" style="max-width:220px">{{ r.name }}</td>
+          <td class="mono wrap" style="max-width:420px">{{ r.value }}</td>
+          <td><span class="pill {{ r.status_class }}">{{ r.status }}</span></td>
+          <td><button class="btn small" type="button" data-copy="{{ r.value }}">Salin nilai</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if has_receive %}<p class="muted" style="padding:12px 20px 16px;font-size:13px">Record "Opsional · menerima email" (MX dan lainnya) hanya perlu bila email <i>masuk</i> ke domain ini juga ditangani Stalwart. Jangan pasang MX bila kotak masuk domain ini ada di layanan lain (mis. Google Workspace).</p>{% endif %}
+</section>
+
+<section class="card" aria-labelledby="pub-h">
+  <div class="card-head">
+    <h2 id="pub-h">Cara memasang record</h2>
+    <nav class="tabs" aria-label="Cara memasang">
+      <a href="/domains/{{ id }}?via=manual" {% if !via_cloudflare %}aria-current="true"{% endif %}>Manual</a>
+      <a href="/domains/{{ id }}?via=cloudflare" {% if via_cloudflare %}aria-current="true"{% endif %}>Otomatis · Cloudflare</a>
+    </nav>
+  </div>
+
+  {% if via_cloudflare %}
+    {% if cf_connected %}
+      <dl class="facts">
+        <dt>Zona Cloudflare</dt><dd class="mono">{{ cf_zone }}</dd>
+        <dt>Sinkron terakhir</dt><dd>{{ cf_last_sync }}</dd>
+      </dl>
+      <form method="post" class="stack" style="gap:12px">
+        <label class="check"><input type="checkbox" name="include_receiving" value="1" {% if include_receiving %}checked{% endif %}>Juga pasang record penerimaan (MX dll.) — hanya jika email masuk ditangani Stalwart</label>
+        <div class="actions">
+          <button class="btn" type="submit" formaction="/domains/{{ id }}/cloudflare/preview">Pratinjau perubahan</button>
+          <button class="btn primary" type="submit" formaction="/domains/{{ id }}/cloudflare/apply">Pasang record di Cloudflare</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:13px">Aman untuk domain yang sudah dipakai: SPF yang ada hanya ditambah <span class="mono">{{ spf_mechanism }}</span>, DMARC yang ada tidak diubah, dan MX yang ada tidak pernah ditimpa.</p>
+
+      {% if !plan.is_empty() %}
+      <div class="stack" style="gap:8px">
+        <span class="label-strong">{{ plan_title }}</span>
+        <div class="table-wrap" style="border:1px solid #EEEEEA;border-radius:8px">
+          <table style="min-width:820px">
+            <thead><tr><th>Aksi</th><th>Tipe</th><th>Nama</th><th>Nilai</th><th>Keterangan</th></tr></thead>
+            <tbody>
+              {% for c in plan %}
+              <tr><td><span class="pill {{ c.class }}">{{ c.label }}</span></td><td class="mono">{{ c.kind }}</td><td class="mono wrap" style="max-width:200px">{{ c.name }}</td><td class="mono wrap" style="max-width:380px">{{ c.content }}</td><td class="muted wrap" style="white-space:normal">{{ c.note }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if plan_is_preview %}<span class="muted" style="font-size:13px">Belum ada yang diubah. Klik "Pasang record di Cloudflare" untuk menerapkan.</span>{% endif %}
+      </div>
+      {% else if !last_changes.is_empty() %}
+      <details>
+        <summary>Perubahan pada sinkron terakhir</summary>
+        <div class="table-wrap">
+          <table style="min-width:820px">
+            <tbody>
+              {% for c in last_changes %}
+              <tr><td><span class="pill {{ c.class }}">{{ c.label }}</span></td><td class="mono">{{ c.kind }}</td><td class="mono wrap">{{ c.name }}</td><td class="muted wrap" style="white-space:normal">{{ c.note }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endif %}
+
+      <form method="post" action="/domains/{{ id }}/cloudflare/disconnect"><button class="btn small" type="submit">Putuskan Cloudflare</button></form>
+    {% else %}
+      <ol class="stack" style="gap:8px;margin:0;padding-left:20px;font-size:14px">
+        <li>Di Cloudflare, buka <b>My Profile › API Tokens › Create Token</b> dan pilih template <b>Edit zone DNS</b>.</li>
+        <li>Batasi ke zona domain ini (<b>Zone Resources › Include › Specific zone</b>), lalu buat token.</li>
+        <li>Tempel token di bawah. BatchMail menyimpannya terenkripsi dan hanya memakainya untuk record domain ini.</li>
+      </ol>
+      <form method="post" action="/domains/{{ id }}/cloudflare/connect" class="stack" style="gap:12px">
+        <div class="field">
+          <label for="cftoken">API token Cloudflare</label>
+          <input id="cftoken" name="token" type="password" autocomplete="off" {% if !cf_env_token %}required{% endif %} placeholder="{% if cf_env_token %}Kosongkan untuk memakai CLOUDFLARE_API_TOKEN dari server{% endif %}">
+        </div>
+        <div><button class="btn primary" type="submit">Hubungkan Cloudflare</button></div>
+      </form>
+    {% endif %}
+  {% else %}
+    <ol class="stack" style="gap:8px;margin:0;padding-left:20px;font-size:14px">
+      <li>Buka pengaturan DNS domain <b>{{ name }}</b> di penyedia domain/DNS Anda (Niagahoster, Rumahweb, IDCloudHost, Cloudflare, dll.).</li>
+      <li>Tambahkan setiap record wajib di tabel atas: pilih tipe, isi nama dan nilainya (pakai tombol <b>Salin nilai</b>). Banyak panel menulis nama tanpa domain, mis. <span class="mono">_dmarc</span> untuk <span class="mono">_dmarc.{{ name }}</span>.</li>
+      <li>Kalau sudah ada record SPF (<span class="mono">v=spf1 …</span>), <b>jangan buat yang kedua</b> — tambahkan <span class="mono">{{ spf_mechanism }}</span> ke record yang ada, sebelum <span class="mono">~all</span>.</li>
+      <li>Tunggu beberapa menit, lalu klik <b>Periksa ulang DNS</b>.</li>
+    </ol>
+    <div class="stack" style="gap:8px">
+      <div class="card-head"><span class="label-strong">File zona (format BIND)</span><button class="btn small" type="button" data-copy-target="zone">Salin semua</button></div>
+      <pre class="code light" id="zone">{{ zone_file }}</pre>
+      <span class="muted" style="font-size:13px">Bisa diimpor di penyedia yang mendukung impor zona (mis. Cloudflare: DNS › Records › Import and Export).</span>
+    </div>
+  {% endif %}
+</section>
+
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-copy],[data-copy-target]');
+  if (!b) return;
+  var text = b.dataset.copy != null ? b.dataset.copy : document.getElementById(b.dataset.copyTarget).textContent;
+  navigator.clipboard.writeText(text).then(function () {
+    var old = b.textContent; b.textContent = 'Tersalin'; setTimeout(function () { b.textContent = old; }, 1500);
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+[Unit]
+Description=BatchMail (bulk email via Stalwart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=batchmail
+Group=batchmail
+WorkingDirectory=/opt/batchmail
+EnvironmentFile=/opt/batchmail/.env
+ExecStart=/usr/local/bin/batchmail
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/batchmail
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Stalwart & domain{% endblock %}
+{% block title %}Koneksi Stalwart{% endblock %}
 {% block content %}
 <header class="page-head">
   <div>
-    <h1>Stalwart &amp; domain</h1>
-    <p class="muted">Koneksi ke mail server Stalwart Anda dan domain yang boleh dipakai sebagai pengirim.</p>
+    <h1>Koneksi Stalwart</h1>
+    <p class="muted">Koneksi BatchMail ke mail server Stalwart Anda.</p>
   </div>
 </header>
 
@@ -34,46 +34,13 @@
   </section>
 </div>
 
-<section class="card" aria-labelledby="add-h">
-  <div class="stack" style="gap:2px">
-    <h2 id="add-h">Tambah domain pengirim</h2>
-    <span class="muted">{% if stalwart_ok %}Domain dan kunci DKIM dibuat otomatis di Stalwart.{% else %}Tanpa Management API, buat kunci DKIM di Stalwart secara manual lalu isi selector-nya.{% endif %}</span>
-  </div>
-  <form method="post" action="/domains" class="grid-2" style="align-items:end">
-    <div class="field"><label for="dname">Domain</label><input id="dname" name="name" type="text" required placeholder="domainanda.id"></div>
-    {% if !stalwart_ok %}<div class="field"><label for="sel">Selector DKIM (opsional)</label><input id="sel" name="dkim_selector" type="text" placeholder="stalwart"></div>{% endif %}
-    <div><button class="btn primary" type="submit">Tambah domain</button></div>
-  </form>
-</section>
-
-{% for d in domains %}
-<section class="card flush" aria-labelledby="dom-{{ d.id }}">
+<section class="card" aria-labelledby="dom-h">
   <div class="card-head">
-    <div class="stack" style="gap:4px">
-      <div class="actions"><h2 id="dom-{{ d.id }}">{{ d.name }}</h2>{% if d.verified %}<span class="pill blue">Siap dipakai</span>{% else %}<span class="pill orange">Belum terverifikasi</span>{% endif %}</div>
-      <span class="muted" style="font-size:13px">
-        SPF {% if d.spf %}lolos{% else %}belum{% endif %} · DKIM {% if d.dkim %}lolos{% else %}belum{% endif %} · DMARC {% if d.dmarc %}lolos{% else %}belum (disarankan){% endif %} · diperiksa {{ d.checked }}
-        {% if d.synced %} · record dari Stalwart{% endif %}
-      </span>
-      {% if !d.error.is_empty() %}<span class="pill orange" style="white-space:normal">Stalwart: {{ d.error }}</span>{% endif %}
+    <div class="stack" style="gap:2px">
+      <h2 id="dom-h">Domain pengirim</h2>
+      <span class="muted">{{ domain_count }} domain terdaftar{% if domains_pending > 0 %} · {{ domains_pending }} belum terverifikasi{% endif %}. Record DNS bisa dipasang manual atau otomatis lewat Cloudflare.</span>
     </div>
-    <div class="actions">
-      <form method="post" action="/domains/{{ d.id }}/verify"><button class="btn small" type="submit">Periksa ulang DNS</button></form>
-      <form method="post" action="/domains/{{ d.id }}/sync"><button class="btn small" type="submit">Ambil ulang dari Stalwart</button></form>
-      <form method="post" action="/domains/{{ d.id }}/delete" onsubmit="return confirm('Hapus domain ini dari BatchMail? (Tidak menghapusnya dari Stalwart.)')"><button class="btn small danger" type="submit">Hapus</button></form>
-    </div>
+    <a class="btn primary" href="/domains">Kelola domain &amp; DNS</a>
   </div>
-  <div class="table-wrap">
-    <table style="min-width:760px">
-      <thead><tr><th>Tipe</th><th>Nama</th><th>Nilai</th></tr></thead>
-      <tbody>
-        {% for r in d.records %}
-        <tr><td class="mono">{{ r.kind }}</td><td class="mono wrap">{{ r.name }}</td><td class="mono wrap">{{ r.value }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="muted" style="padding:12px 20px 16px;font-size:13px">Pasang record di atas di penyedia DNS domain Anda. Untuk mengirim, SPF dan DKIM wajib lolos; DMARC sangat disarankan.</p>
 </section>
-{% endfor %}
 {% endblock %}

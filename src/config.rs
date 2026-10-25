@@ -30,6 +30,10 @@ pub struct Config {
     pub stalwart_api_url: Option<String>,
     /// Stalwart API key (Bearer) or "user:password" (Basic).
     pub stalwart_api_token: Option<String>,
+    /// Public hostname of the Stalwart server, used in the SPF record (`a:<host>`).
+    pub mail_hostname: String,
+    /// Optional default Cloudflare API token (Zone › DNS › Edit) for automatic DNS setup.
+    pub cloudflare_api_token: Option<String>,
 
     /// Allow sending from domains whose SPF/DKIM are not verified yet (dev only).
     pub allow_unverified_domains: bool,
@@ -93,6 +97,12 @@ impl Config {
             smtp_pass: var("SMTP_PASS"),
             stalwart_api_url: var("STALWART_API_URL").map(|u| u.trim_end_matches('/').to_string()),
             stalwart_api_token: var("STALWART_API_TOKEN"),
+            mail_hostname: var("MAIL_HOSTNAME")
+                .or_else(|| var("SMTP_HOST"))
+                .unwrap_or_default()
+                .trim_end_matches('.')
+                .to_ascii_lowercase(),
+            cloudflare_api_token: var("CLOUDFLARE_API_TOKEN"),
             allow_unverified_domains: parse("ALLOW_UNVERIFIED_DOMAINS", false)?,
             default_rate_per_minute: parse("DEFAULT_RATE_PER_MINUTE", 400)?,
             max_recipients_api: parse("MAX_RECIPIENTS_API", 10_000)?,
@@ -118,6 +128,8 @@ impl Config {
             smtp_pass: None,
             stalwart_api_url: None,
             stalwart_api_token: None,
+            mail_hostname: "mail.domainanda.id".into(),
+            cloudflare_api_token: None,
             allow_unverified_domains: false,
             default_rate_per_minute: 400,
             max_recipients_api: 10_000,

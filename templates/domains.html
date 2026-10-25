@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Domain & DNS{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Domain &amp; DNS</h1>
+    <p class="muted">Domain yang boleh dipakai sebagai pengirim. Pasang record DNS-nya manual, atau biarkan BatchMail memasangnya lewat Cloudflare.</p>
+  </div>
+</header>
+
+{% if let Some(n) = notice %}<div class="notice" role="status">{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<div class="notice error" role="alert">{{ e }}</div>{% endif %}
+
+<section class="card" aria-labelledby="add-h">
+  <div class="stack" style="gap:2px">
+    <h2 id="add-h">Tambah domain pengirim</h2>
+    <span class="muted">{% if stalwart_api %}Domain dan kunci DKIM dibuat otomatis di Stalwart.{% else %}Management API Stalwart belum diatur: buat kunci DKIM di Stalwart secara manual, lalu isi selector-nya.{% endif %}</span>
+  </div>
+  <form method="post" action="/domains" class="grid-2" style="align-items:end">
+    <div class="field"><label for="dname">Domain</label><input id="dname" name="name" type="text" required placeholder="domainanda.id" autocomplete="off"></div>
+    {% if !stalwart_api %}<div class="field"><label for="sel">Selector DKIM (opsional)</label><input id="sel" name="dkim_selector" type="text" placeholder="stalwart"></div>{% endif %}
+    <div><button class="btn primary" type="submit">Tambah domain</button></div>
+  </form>
+</section>
+
+<section class="card flush" aria-labelledby="list-h">
+  <div class="card-head"><h2 id="list-h">Domain terdaftar</h2></div>
+  <div class="table-wrap">
+    <table style="min-width:760px">
+      <thead><tr><th>Domain</th><th>Status</th><th>SPF</th><th>DKIM</th><th>DMARC</th><th>DNS lewat</th><th>Diperiksa</th></tr></thead>
+      <tbody>
+        {% for d in rows %}
+        <tr>
+          <td><a href="/domains/{{ d.id }}" style="font-weight:500;color:inherit">{{ d.name }}</a></td>
+          <td><span class="pill {{ d.status_class }}">{{ d.status }}</span></td>
+          <td>{% if d.spf %}<span class="pill blue">Lolos</span>{% else %}<span class="pill orange">Belum</span>{% endif %}</td>
+          <td>{% if d.dkim %}<span class="pill blue">Lolos</span>{% else %}<span class="pill orange">Belum</span>{% endif %}</td>
+          <td>{% if d.dmarc %}<span class="pill blue">Lolos</span>{% else %}<span class="pill gray">Belum</span>{% endif %}</td>
+          <td class="muted">{{ d.provider }}</td>
+          <td class="muted">{{ d.checked }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">Belum ada domain. Tambahkan domain yang akan dipakai di alamat pengirim, mis. <span class="mono">info@domainanda.id</span>.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
