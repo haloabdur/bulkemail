@@ -18,6 +18,7 @@ Tujuannya sederhana: siapa pun yang punya sistem (HR, toko online, klinik, sekol
 2. [Prasyarat](#prasyarat)
 3. [Instalasi A — Docker Compose (Stalwart + BatchMail)](#instalasi-a--docker-compose-stalwart--batchmail)
 4. [Instalasi B — Dari source (tanpa Docker)](#instalasi-b--dari-source-tanpa-docker)
+   - [Instalasi C — Single binary siap pakai](#instalasi-c--single-binary-siap-pakai)
 5. [Menyiapkan Stalwart](#menyiapkan-stalwart)
 6. [Reverse proxy HTTPS](#reverse-proxy-https)
 7. [Langkah pertama di dashboard](#langkah-pertama-di-dashboard)
@@ -110,6 +111,37 @@ batchmail create-user email@domain.id 'password-minimal-10-karakter'   # tambah 
 ```
 
 (Jalankan dengan `.env` yang sama, mis. dari `/opt/batchmail`, atau `docker compose exec batchmail batchmail create-user …`.)
+
+## Instalasi C — Single binary siap pakai
+
+BatchMail bisa dibuild menjadi **satu file binary statis** (musl). Template, CSS, dan migrasi database sudah tertanam di dalamnya, dan tidak perlu Rust, Docker, atau library sistem apa pun. Binary ini jalan di Linux x86_64 mana pun (Ubuntu, Debian, CentOS/AlmaLinux, Alpine, …).
+
+```bash
+# Unduh dari halaman Releases (atau pakai arsip hasil build sendiri, lihat di bawah)
+tar xzf batchmail-v0.1.0-linux-x86_64.tar.gz
+cd batchmail-linux-x86_64
+sha256sum -c ../batchmail-v0.1.0-linux-x86_64.tar.gz.sha256   # opsional
+
+sudo install -m 755 batchmail /usr/local/bin/batchmail
+sudo useradd --system --home /opt/batchmail --create-home batchmail
+sudo cp .env.example /opt/batchmail/.env && sudo nano /opt/batchmail/.env
+sudo chown -R batchmail:batchmail /opt/batchmail && sudo chmod 600 /opt/batchmail/.env
+sudo cp batchmail.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now batchmail
+```
+
+Isi arsip: `batchmail` (binary), `.env.example`, `batchmail.service`, `README.md`, `LICENSE`. Saat jalan, BatchMail hanya membuat file database SQLite di lokasi `DATABASE_URL`.
+
+**Build binary statis sendiri:**
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+sudo apt-get install -y musl-tools
+CC_x86_64_unknown_linux_musl=musl-gcc cargo build --release --locked --target x86_64-unknown-linux-musl
+# hasil: target/x86_64-unknown-linux-musl/release/batchmail
+```
+
+**Rilis otomatis:** push tag `v*` (mis. `git tag v0.1.0 && git push origin v0.1.0`). Workflow `.github/workflows/release.yml` lalu menjalankan tes, membuild binary statis untuk `linux-x86_64` dan `linux-arm64`, dan melampirkannya ke GitHub Release.
 
 ## Menyiapkan Stalwart
 
