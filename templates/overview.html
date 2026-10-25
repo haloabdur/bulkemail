@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Ringkasan{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Ringkasan</h1>
+    <p class="muted">Semua pengiriman — dari dashboard maupun lewat API — 30 hari terakhir.</p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/api-keys">Buat API key</a>
+    <a class="btn primary" href="/batches/new">+ Kirim batch baru</a>
+  </div>
+</header>
+
+{% if no_domain %}
+<div class="notice">Mulai dari sini: <a href="/settings">tambahkan domain pengirim</a>. BatchMail akan menyiapkannya di Stalwart dan menampilkan record DNS yang perlu dipasang.</div>
+{% endif %}
+
+<section class="stats" aria-label="Statistik">
+  <div class="stat"><span class="label">Diterima Stalwart</span><span class="value">{{ sent }}</span><span class="label">dari {{ batch_count }} batch</span></div>
+  <div class="stat"><span class="label">Tingkat diterima</span><span class="value">{{ delivered_rate }}</span><span class="label">diterima untuk dikirim</span></div>
+  <div class="stat"><span class="label">Gagal</span><span class="value warn">{{ failed }}</span><span class="label">{{ failed_rate }} dari yang diproses</span></div>
+  <div class="stat"><span class="label">Antrean</span><span class="value">{{ queue }}</span><span class="label">{{ queue_note }}</span></div>
+</section>
+
+<div class="row">
+  <section class="card grow-2" aria-labelledby="vol-h">
+    <div class="card-head">
+      <h2 id="vol-h">Volume pengiriman · 14 hari</h2>
+      <div class="actions muted" style="font-size:13px;gap:16px">
+        <span><span class="swatch blue"></span> Diterima</span>
+        <span><span class="swatch orange"></span> Gagal</span>
+      </div>
+    </div>
+    <div class="chart" role="img" aria-label="Grafik volume pengiriman 14 hari terakhir">
+      {% for b in bars %}
+      <div class="col" title="{{ b.label }}">
+        <div class="fail" style="height: {{ b.fail }}%"></div>
+        <div class="ok" style="height: {{ b.ok }}%"></div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card grow-1" aria-labelledby="src-h">
+    <div class="card-head"><h2 id="src-h">Sumber pengiriman</h2><a href="/api-keys" style="font-size:13px">Kelola key</a></div>
+    {% for s in sources %}
+    <div class="stack" style="gap:6px">
+      <div class="card-head" style="gap:8px"><span style="font-weight:500">{{ s.name }}</span><span>{{ s.count }}</span></div>
+      <div class="meter"><div style="width: {{ s.pct }}%"></div></div>
+    </div>
+    {% else %}
+    <p class="muted">Belum ada pengiriman.</p>
+    {% endfor %}
+  </section>
+</div>
+
+<section class="card flush" aria-labelledby="recent-h">
+  <div class="card-head"><h2 id="recent-h">Batch terbaru</h2><a href="/batches" style="font-size:13px">Lihat semua riwayat</a></div>
+  {% include "batch_table.html" %}
+</section>
+{% endblock %}

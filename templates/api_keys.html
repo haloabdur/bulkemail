@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}API keys{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>API keys &amp; integrasi</h1>
+    <p class="muted">Satu key per sistem. Sistem Anda cukup memanggil satu endpoint untuk mengirim batch.</p>
+  </div>
+</header>
+
+{% if let Some(n) = notice %}<div class="notice" role="status">{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<div class="notice error" role="alert">{{ e }}</div>{% endif %}
+
+{% if let Some((name, key)) = new_key %}
+<section class="card" aria-labelledby="new-h">
+  <div class="card-head"><h2 id="new-h">Key baru dibuat: “{{ name }}”</h2><span class="pill orange">Hanya ditampilkan sekali</span></div>
+  <div class="key-box">
+    <label for="newkey" class="sr-only">API key baru</label>
+    <input id="newkey" type="text" readonly value="{{ key }}" onclick="this.select()">
+  </div>
+  <p class="muted" style="font-size:13px">Simpan di sistem Anda sebagai variabel lingkungan, mis. <span class="mono">BATCHMAIL_KEY</span>. Kami hanya menyimpan hash-nya.</p>
+</section>
+{% endif %}
+
+<section class="card" aria-labelledby="create-h">
+  <h2 id="create-h">Buat API key</h2>
+  <form method="post" action="/api-keys" class="stack">
+    <div class="grid-2">
+      <div class="field"><label for="kname">Nama sistem</label><input id="kname" name="name" type="text" required placeholder="Sistem HR"></div>
+      <div class="field">
+        <label for="mode">Mode</label>
+        <select id="mode" name="mode"><option value="live">Live — benar-benar mengirim</option><option value="test">Test — tidak mengirim, untuk staging</option></select>
+      </div>
+      <div class="field">
+        <label for="domain_id">Boleh mengirim dari</label>
+        <select id="domain_id" name="domain_id"><option value="">Semua domain</option>{% for (id, d) in domains %}<option value="{{ id }}">{{ d }}</option>{% endfor %}</select>
+      </div>
+      <div class="field"><label for="daily_limit">Batas per hari (opsional)</label><input id="daily_limit" name="daily_limit" type="number" min="1" placeholder="10000"></div>
+    </div>
+    <div><button class="btn primary" type="submit">Buat API key</button></div>
+  </form>
+</section>
+
+<section class="card flush" aria-labelledby="keys-h">
+  <div class="card-head"><h2 id="keys-h">Key aktif</h2></div>
+  <div class="table-wrap">
+    <table style="min-width:880px">
+      <thead><tr><th>Nama</th><th>Key</th><th>Mode</th><th>Domain</th><th>Batas</th><th>Pemakaian 30 hari</th><th>Terakhir dipakai</th><th><span class="sr-only">Aksi</span></th></tr></thead>
+      <tbody>
+        {% for k in keys %}
+        <tr>
+          <td style="font-weight:500">{{ k.name }}</td>
+          <td class="mono">{{ k.display }}</td>
+          <td>{% if k.test_mode %}<span class="pill gray">Test</span>{% else %}<span class="pill blue">Live</span>{% endif %}</td>
+          <td class="muted">{{ k.domain }}</td>
+          <td class="muted">{{ k.limit }}</td>
+          <td>{{ k.usage }}</td>
+          <td class="muted">{{ k.last }}</td>
+          <td style="text-align:right"><form method="post" action="/api-keys/{{ k.id }}/revoke" onsubmit="return confirm('Cabut key ini? Sistem yang memakainya akan langsung ditolak.')"><button class="btn small danger" type="submit">Cabut</button></form></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">Belum ada API key.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="row">
+  <section class="card grow-2" aria-labelledby="qs-h">
+    <h2 id="qs-h">Mulai cepat: kirim batch lewat API</h2>
+    <pre class="code">{{ curl_example }}</pre>
+    <span class="label-strong">Respons</span>
+    <pre class="code light">{{ response_example }}</pre>
+  </section>
+  <section class="card grow-1" aria-labelledby="ep-h">
+    <h2 id="ep-h">Endpoint</h2>
+    <p class="muted mono">{{ base_url }}/api/v1</p>
+    <dl class="stack" style="gap:10px;margin:0">
+      <div><dt class="mono"><b>POST</b> /batches</dt><dd class="muted" style="margin:0">Kirim batch (maks. 10.000 penerima per request)</dd></div>
+      <div><dt class="mono"><b>POST</b> /emails</dt><dd class="muted" style="margin:0">Kirim satu email transaksional</dd></div>
+      <div><dt class="mono"><b>GET</b> /batches/:id</dt><dd class="muted" style="margin:0">Status &amp; hitungan per batch</dd></div>
+      <div><dt class="mono"><b>GET</b> /batches/:id/recipients</dt><dd class="muted" style="margin:0">Status per penerima + respons SMTP</dd></div>
+      <div><dt class="mono"><b>DELETE</b> /batches/:id</dt><dd class="muted" style="margin:0">Batalkan batch yang belum selesai</dd></div>
+      <div><dt class="mono"><b>GET</b> /domains</dt><dd class="muted" style="margin:0">Domain yang boleh dipakai key ini</dd></div>
+    </dl>
+  </section>
+</div>
+{% endblock %}

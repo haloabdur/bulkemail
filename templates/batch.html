@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ b.name }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <a href="/batches" style="font-size:13px;text-decoration:none">← Riwayat batch</a>
+    <div class="actions" style="gap:12px">
+      <h1>{{ b.name }}</h1>
+      <span class="pill {{ status_class }}">{{ status }}</span>
+      {% if b.test_mode %}<span class="pill purple">Mode test</span>{% endif %}
+    </div>
+    <p class="muted"><span class="mono">{{ b.id }}</span> · {{ b.source }} · {{ b.kind }} · {% if b.status == "scheduled" %}dijadwalkan{% else %}dibuat{% endif %} {{ started }} · dari {{ b.from_addr }}</p>
+  </div>
+  <div class="actions">
+    {% if can_pause %}<form method="post" action="/batches/{{ b.id }}/pause"><button class="btn" type="submit">Jeda</button></form>{% endif %}
+    {% if can_resume %}<form method="post" action="/batches/{{ b.id }}/resume"><button class="btn" type="submit">Lanjutkan</button></form>{% endif %}
+    {% if can_cancel %}<form method="post" action="/batches/{{ b.id }}/cancel"><button class="btn danger" type="submit">Batalkan</button></form>{% endif %}
+    <a class="btn" href="/batches/{{ b.id }}/export.csv">Unduh laporan CSV</a>
+    {% if has_failed %}<form method="post" action="/batches/{{ b.id }}/retry"><button class="btn primary" type="submit">Kirim ulang yang gagal</button></form>{% endif %}
+  </div>
+</header>
+
+{% if let Some(n) = notice %}<div class="notice" role="status">{{ n }}</div>{% endif %}
+
+<section class="card" aria-label="Progres batch">
+  <div class="card-head"><span><b>{{ processed }}</b> dari {{ total }} diproses</span><span class="muted">{{ eta }}</span></div>
+  <div class="progress" role="img" aria-label="Progres pengiriman">
+    <div class="s" style="width: {{ "{:.2}"|format(pct_sent) }}%"></div>
+    <div class="f" style="width: {{ "{:.2}"|format(pct_failed) }}%"></div>
+    <div class="d" style="width: {{ "{:.2}"|format(pct_deferred) }}%"></div>
+  </div>
+  <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px">
+    {% for (label, n, cls) in counts %}
+    <div class="stat" style="padding:12px 14px;gap:4px">
+      <span class="label"><span class="swatch {{ cls }}"></span> {{ label }}</span>
+      <span class="value" style="font-size:22px">{{ n }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted" style="font-size:13px">"Diterima Stalwart" berarti Stalwart menerima pesan untuk dikirim; Stalwart lalu mengantarkannya ke server penerima dan mencoba ulang sendiri bila perlu.</p>
+</section>
+
+<section class="card flush" aria-labelledby="rcp-h">
+  <div class="card-head">
+    <h2 id="rcp-h">Penerima</h2>
+    <div class="actions">
+      <nav class="tabs" aria-label="Filter status">
+        {% for f in filters %}<a href="{{ f.href }}" {% if f.active %}aria-current="true"{% endif %}>{{ f.label }}</a>{% endfor %}
+      </nav>
+      <form method="get" action="/batches/{{ b.id }}" class="actions">
+        {% if !status_filter.is_empty() %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+        <label for="q" class="sr-only">Cari email</label>
+        <input id="q" name="q" type="search" placeholder="Cari email…" value="{{ q }}" style="width:220px;min-height:40px">
+      </form>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table style="min-width:860px">
+      <thead><tr><th>Email</th><th>Status</th><th>Respons SMTP (Stalwart)</th><th>Percobaan</th><th>Waktu</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.email }}</td>
+          <td><span class="pill {{ r.status_class }}">{{ r.status }}</span></td>
+          <td class="mono wrap" style="color:#3A3F4A;max-width:420px">{{ r.smtp }}</td>
+          <td class="muted">{{ r.attempts }}</td>
+          <td class="muted">{{ r.time }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">Tidak ada penerima dengan filter ini.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-head" style="padding:14px 20px">
+    <span class="muted">Halaman {{ page }}</span>
+    <div class="actions">
+      {% if page > 1 %}<a class="btn small" href="/batches/{{ b.id }}?status={{ status_filter }}&q={{ q|urlencode }}&page={{ page - 1 }}">Sebelumnya</a>{% endif %}
+      {% if has_next %}<a class="btn small" href="/batches/{{ b.id }}?status={{ status_filter }}&q={{ q|urlencode }}&page={{ page + 1 }}">Berikutnya</a>{% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

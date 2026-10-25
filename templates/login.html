@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Masuk · BatchMail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="auth">
+  <section class="auth-side" aria-label="Tentang BatchMail">
+    <span class="brand" style="padding:0"><span class="brand-mark"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg></span>BatchMail</span>
+    <div>
+      <h2>Kirim email massal dari server Stalwart Anda sendiri.</h2>
+      <ul>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B8CFF" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Upload CSV atau tempel daftar, langsung kirim</li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B8CFF" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Satu API key per sistem, satu endpoint untuk batch</li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B8CFF" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Domain, DKIM dan DNS diatur lewat Stalwart</li>
+      </ul>
+    </div>
+    <span class="mono" style="color:#9EA3AF">{{ smtp }}</span>
+  </section>
+  <main class="auth-main">
+    <form class="auth-form" method="post" action="/login">
+      <div class="stack" style="gap:6px">
+        <h1>Masuk</h1>
+        <p class="muted">Gunakan akun dashboard yang dibuat admin.</p>
+      </div>
+      {% if error %}<div class="notice error" role="alert">Email atau password salah.</div>{% endif %}
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required value="{{ email }}">
+      </div>
+      <div class="field">
+        <label for="pw">Password</label>
+        <input id="pw" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <label class="check"><input type="checkbox" name="remember" value="1" checked>Ingat saya selama 30 hari</label>
+      <button class="btn primary" type="submit" style="min-height:48px">Masuk</button>
+      <p class="muted" style="font-size:13px">Lupa password? Minta admin menjalankan <span class="mono">batchmail create-user</span>.</p>
+    </form>
+  </main>
+</div>
+</body>
+</html>

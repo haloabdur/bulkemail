@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Berhenti berlangganan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="public">
+  {% if !domain.is_empty() %}<span style="font-weight:600;color:#3A3F4A">{{ domain }}</span>{% endif %}
+  <main class="public-card">
+    {% if state == "confirm" %}
+      <div class="icon-tile"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3A3F4A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg></div>
+      <div class="stack" style="gap:8px">
+        <h1>Berhenti menerima email?</h1>
+        <p>Alamat <b>{{ email }}</b> tidak akan lagi menerima email massal dari <b>{{ domain }}</b>.</p>
+      </div>
+      <form method="post" action="/u/{{ token }}" class="stack">
+        <fieldset>
+          <legend>Alasan (opsional)</legend>
+          <label class="choice"><input type="radio" name="reason" value="Terlalu sering">Terlalu sering</label>
+          <label class="choice"><input type="radio" name="reason" value="Tidak relevan">Tidak relevan untuk saya</label>
+          <label class="choice"><input type="radio" name="reason" value="Tidak pernah mendaftar">Saya tidak pernah mendaftar</label>
+          <label class="choice"><input type="radio" name="reason" value="Lainnya">Lainnya</label>
+        </fieldset>
+        <button class="btn dark" type="submit">Ya, berhenti berlangganan</button>
+      </form>
+      <p class="muted" style="font-size:13px;text-align:center">Email transaksional penting (misalnya struk) tetap dikirim.</p>
+    {% else if state == "done" %}
+      <div class="icon-tile ok"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1D3FA8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div class="stack" style="gap:8px">
+        <h1>Anda sudah berhenti berlangganan</h1>
+        <p>{{ email }} dihapus dari daftar email massal {{ domain }}. Perubahan berlaku segera.</p>
+      </div>
+      <form method="post" action="/u/{{ token }}/resubscribe" class="card-head" style="padding:16px;border-radius:10px;background:#FAFAF8;border:1px solid #EEEEEA">
+        <span>Tidak sengaja?</span>
+        <button class="btn" type="submit">Berlangganan lagi</button>
+      </form>
+    {% else if state == "resubscribed" %}
+      <div class="icon-tile ok"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1D3FA8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h1>Anda berlangganan lagi</h1>
+      <p>{{ email }} akan kembali menerima email dari {{ domain }}.</p>
+    {% else %}
+      <h1>Link tidak valid</h1>
+      <p>Link berhenti berlangganan ini rusak atau tidak lengkap. Coba klik lagi link di email Anda.</p>
+    {% endif %}
+  </main>
+  <span class="muted" style="font-size:12px">Dikirim lewat BatchMail</span>
+</div>
+</body>
+</html>

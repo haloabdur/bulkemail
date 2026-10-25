@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Unsubscribe{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Daftar unsubscribe</h1>
+    <p class="muted">{{ total }} alamat tidak akan menerima email marketing. Email transaksional tetap dikirim.</p>
+  </div>
+</header>
+
+{% if let Some(n) = notice %}<div class="notice" role="status">{{ n }}</div>{% endif %}
+
+<section class="card" aria-labelledby="add-h">
+  <h2 id="add-h">Tambah manual</h2>
+  <form method="post" action="/suppressions" class="grid-2" style="align-items:end">
+    <div class="field"><label for="semail">Email (pisahkan dengan koma untuk banyak)</label><input id="semail" name="email" type="text" required></div>
+    <div class="field"><label for="sreason">Alasan (opsional)</label><input id="sreason" name="reason" type="text"></div>
+    <div><button class="btn primary" type="submit">Tambahkan</button></div>
+  </form>
+</section>
+
+<section class="card flush" aria-labelledby="list-h">
+  <div class="card-head">
+    <h2 id="list-h">Alamat</h2>
+    <form method="get" action="/suppressions"><label for="q" class="sr-only">Cari email</label><input id="q" name="q" type="search" placeholder="Cari email…" value="{{ q }}" style="width:240px;min-height:40px"></form>
+  </div>
+  <div class="table-wrap">
+    <table style="min-width:720px">
+      <thead><tr><th>Email</th><th>Sumber</th><th>Alasan</th><th>Waktu</th><th><span class="sr-only">Aksi</span></th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.email }}</td><td class="muted">{{ r.source }}</td><td class="muted">{{ r.reason }}</td><td class="muted">{{ r.time }}</td>
+          <td style="text-align:right"><form method="post" action="/suppressions/delete"><input type="hidden" name="email" value="{{ r.email }}"><button class="btn small" type="submit">Hapus</button></form></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">Belum ada alamat.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

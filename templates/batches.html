@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Riwayat batch{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Riwayat batch</h1>
+    <p class="muted">200 batch terakhir, dari dashboard dan API.</p>
+  </div>
+  <a class="btn primary" href="/batches/new">+ Kirim batch baru</a>
+</header>
+<section class="card flush" aria-label="Daftar batch">
+  {% include "batch_table.html" %}
+</section>
+{% endblock %}

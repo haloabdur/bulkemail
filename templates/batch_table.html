@@ -1,0 +1,19 @@
+<div class="table-wrap">
+  <table style="min-width: 820px">
+    <thead><tr><th>Batch</th><th>Sumber</th><th>Penerima</th><th style="width:200px">Progres</th><th>Status</th><th>Waktu</th></tr></thead>
+    <tbody>
+      {% for r in batches %}
+      <tr>
+        <td><a href="/batches/{{ r.id }}" style="font-weight:500;color:inherit;text-decoration:none">{{ r.name }}</a><div class="cell-sub">{{ r.id }}</div></td>
+        <td>{{ r.source }}</td>
+        <td>{{ r.total }}</td>
+        <td><div class="actions" style="gap:10px;flex-wrap:nowrap"><div class="meter"><div style="width: {{ r.pct }}%"></div></div><span class="muted" style="font-size:12px">{{ r.pct }}%</span></div></td>
+        <td><span class="pill {{ r.status_class }}">{{ r.status }}</span></td>
+        <td class="muted">{{ r.time }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty">Belum ada batch. <a href="/batches/new">Kirim batch pertama</a> atau pakai API.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

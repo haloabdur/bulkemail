@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Kirim batch{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <a href="/" style="font-size:13px;text-decoration:none">← Ringkasan</a>
+    <h1>Kirim batch baru</h1>
+    <p class="muted">Unggah daftar penerima, tulis pesan dengan variabel, lalu kirim lewat Stalwart.</p>
+  </div>
+</header>
+
+{% if let Some(e) = error %}<div class="notice error" role="alert">{{ e }}</div>{% endif %}
+{% if let Some(i) = info %}<div class="notice" role="status">{{ i }}</div>{% endif %}
+{% if domains.is_empty() %}
+<div class="notice error">Belum ada domain pengirim yang terverifikasi. <a href="/settings">Tambahkan dan verifikasi domain</a> dulu.</div>
+{% endif %}
+
+<form method="post" action="/batches" enctype="multipart/form-data" class="row">
+  <div class="stack grow-2">
+    <section class="card" aria-labelledby="s1">
+      <div class="step"><span class="step-num">1</span><h2 id="s1">Penerima</h2></div>
+      <div class="field">
+        <label for="csv">Upload CSV</label>
+        <input id="csv" name="csv" type="file" accept=".csv,text/csv">
+        <span class="hint">Baris pertama adalah header dan wajib ada kolom <span class="mono">email</span>. Kolom lain otomatis jadi variabel, mis. kolom <span class="mono">nama</span> → <span class="mono">{% raw %}{{nama}}{% endraw %}</span>. Dari Excel: Simpan sebagai CSV.</span>
+      </div>
+      <div class="field">
+        <label for="paste">…atau tempel daftar (satu per baris, <span class="mono">email</span> atau <span class="mono">email,nama</span>)</label>
+        <textarea id="paste" name="paste" rows="6" placeholder="andi@contoh.co.id,Andi&#10;siti@contoh.com,Siti">{{ paste }}</textarea>
+      </div>
+      <p class="muted" style="font-size:13px">Alamat tidak valid, duplikat, dan yang sudah berhenti berlangganan dilewati otomatis.</p>
+    </section>
+
+    <section class="card" aria-labelledby="s2">
+      <div class="step"><span class="step-num">2</span><h2 id="s2">Pesan</h2></div>
+      <div class="grid-2">
+        <div class="field"><label for="from_name">Nama pengirim</label><input id="from_name" name="from_name" type="text" value="{{ from_name }}" placeholder="Tim Toko"></div>
+        <div class="field">
+          <label for="from_email">Email pengirim</label>
+          <input id="from_email" name="from_email" type="email" required value="{{ from_email }}" list="domain-hints">
+          <span class="hint">Domain siap: {% for d in domains %}<span class="mono">{{ d }}</span>{% if !loop.last %}, {% endif %}{% else %}belum ada{% endfor %}{% if !unverified.is_empty() %} · belum terverifikasi: {% for d in unverified %}<span class="mono">{{ d }}</span>{% if !loop.last %}, {% endif %}{% endfor %}{% endif %}</span>
+          <datalist id="domain-hints">{% for d in domains %}<option value="info@{{ d }}"></option>{% endfor %}</datalist>
+        </div>
+        <div class="field"><label for="reply_to">Reply-To (opsional)</label><input id="reply_to" name="reply_to" type="email" value="{{ reply_to }}"></div>
+        <div class="field"><label for="name">Nama batch (opsional)</label><input id="name" name="name" type="text" placeholder="Newsletter Oktober"></div>
+      </div>
+      <div class="field"><label for="subject">Subjek</label><input id="subject" name="subject" type="text" required value="{{ subject }}" placeholder="Halo {% raw %}{{nama}}{% endraw %}, promo Oktober untukmu"></div>
+      <div class="field">
+        <label for="html">Isi HTML</label>
+        <textarea id="html" name="html" rows="10">{{ html }}</textarea>
+        <span class="hint">Variabel: kolom CSV, plus <span class="mono">{% raw %}{{email}}{% endraw %}</span> dan <span class="mono">{% raw %}{{unsubscribe_url}}{% endraw %}</span>. Jika link unsubscribe tidak ada, BatchMail menambahkannya di bawah email marketing.</span>
+      </div>
+      <div class="field">
+        <label for="text">Versi teks biasa (opsional, disarankan)</label>
+        <textarea id="text" name="text" rows="4">{{ text }}</textarea>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="s3">
+      <div class="step"><span class="step-num">3</span><h2 id="s3">Jenis, jadwal &amp; kecepatan</h2></div>
+      <fieldset>
+        <legend>Jenis email</legend>
+        <div class="grid-2">
+          <label class="choice"><input type="radio" name="kind" value="marketing" {% if kind == "marketing" %}checked{% endif %}>Marketing / newsletter</label>
+          <label class="choice"><input type="radio" name="kind" value="transactional" {% if kind == "transactional" %}checked{% endif %}>Transaksional (struk, slip gaji)</label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Waktu kirim</legend>
+        <div class="grid-2">
+          <label class="choice"><input type="radio" name="schedule" value="now" {% if schedule == "now" %}checked{% endif %}>Kirim sekarang</label>
+          <label class="choice"><input type="radio" name="schedule" value="later" {% if schedule == "later" %}checked{% endif %}>Jadwalkan</label>
+        </div>
+      </fieldset>
+      <div class="grid-2">
+        <div class="field"><label for="send_at">Tanggal &amp; jam (jika dijadwalkan)</label><input id="send_at" name="send_at" type="datetime-local" value="{{ send_at }}"></div>
+        <div class="field"><label for="rate">Batas kirim per menit</label><input id="rate" name="rate" type="number" min="1" max="10000" value="{{ rate }}"></div>
+      </div>
+    </section>
+  </div>
+
+  <aside class="stack grow-1" aria-label="Kirim">
+    <section class="card">
+      <h2>Siap kirim?</h2>
+      <p class="muted" style="font-size:13px">Email tes dikirim ke <b>{{ user }}</b> memakai variabel dari penerima pertama.</p>
+      <button class="btn block" type="submit" name="action" value="test" formnovalidate>Kirim email tes ke saya</button>
+      <button class="btn primary block" type="submit" name="action" value="send" style="min-height:48px">Kirim batch</button>
+      <dl class="facts">
+        <dt>Via</dt><dd class="mono">{{ smtp }}</dd>
+      </dl>
+    </section>
+  </aside>
+</form>
+{% endblock %}
