@@ -36,6 +36,7 @@
         <select id="domain_id" name="domain_id"><option value="">Semua domain</option>{% for (id, d) in domains %}<option value="{{ id }}">{{ d }}</option>{% endfor %}</select>
       </div>
       <div class="field"><label for="daily_limit">Batas per hari (opsional)</label><input id="daily_limit" name="daily_limit" type="number" min="1" placeholder="10000"></div>
+      <div class="field"><label for="webhook_url">Webhook status (opsional)</label><input id="webhook_url" name="webhook_url" type="url" placeholder="https://sistem-anda.id/hooks/batchmail"></div>
     </div>
     <div><button class="btn primary" type="submit">Buat API key</button></div>
   </form>
@@ -64,6 +65,44 @@
       </tbody>
     </table>
   </div>
+</section>
+
+<section class="card" aria-labelledby="wh-h">
+  <div class="card-head"><h2 id="wh-h">Webhook status ke sistem Anda</h2></div>
+  <p class="muted" style="font-size:13px">BatchMail mengirim <span class="mono">POST</span> JSON ke URL ini saat batch selesai (<span class="mono">batch.completed</span>) dan saat penerima bounce atau komplain (<span class="mono">recipient.bounced</span>, <span class="mono">recipient.complained</span>). Setiap request ditandatangani dengan rahasia di bawah. Event yang gagal dicoba ulang sampai 6 kali dalam ±9 jam.</p>
+  {% for h in hooks %}
+  <div class="stack" style="border-top:1px solid var(--line, #e5e5e0);padding-top:14px;margin-top:14px">
+    <strong>{{ h.name }}</strong>
+    <form method="post" action="/api-keys/{{ h.id }}/webhook" class="actions" style="gap:8px;flex-wrap:wrap">
+      <label for="wh{{ h.id }}" class="sr-only">URL webhook untuk {{ h.name }}</label>
+      <input id="wh{{ h.id }}" name="webhook_url" type="url" value="{{ h.url }}" placeholder="https://sistem-anda.id/hooks/batchmail" style="flex:1;min-width:260px">
+      <button class="btn small primary" type="submit">Simpan</button>
+    </form>
+    {% if !h.secret.is_empty() %}
+    <details>
+      <summary class="muted" style="cursor:pointer;font-size:13px">Rahasia tanda tangan</summary>
+      <input type="text" readonly value="{{ h.secret }}" onclick="this.select()" class="mono" style="margin-top:6px;width:100%">
+    </details>
+    {% endif %}
+    {% if !h.url.is_empty() %}
+    <form method="post" action="/api-keys/{{ h.id }}/webhook/test"><button class="btn small" type="submit">Kirim event tes</button></form>
+    {% endif %}
+    {% if !h.recent.is_empty() %}
+    <div class="table-wrap">
+      <table style="min-width:640px">
+        <thead><tr><th>Event</th><th>Status</th><th>Percobaan</th><th>Waktu</th><th>Keterangan</th></tr></thead>
+        <tbody>
+          {% for d in h.recent %}
+          <tr><td class="mono">{{ d.event }}</td><td><span class="pill {{ d.status_class }}">{{ d.status }}</span></td><td>{{ d.attempts }}</td><td class="muted">{{ d.time }}</td><td class="muted">{{ d.error }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="empty">Buat API key dulu.</p>
+  {% endfor %}
 </section>
 
 <div class="row">

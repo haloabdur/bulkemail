@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use batchmail::{AppState, app, auth, config::Config, worker};
+use batchmail::{AppState, app, auth, config::Config, webhooks, worker};
 use tracing_subscriber::EnvFilter;
 
 const USAGE: &str = "Pemakaian:
@@ -53,6 +53,7 @@ async fn serve(state: AppState) -> Result<()> {
     }
 
     tokio::spawn(worker::run(state.clone()));
+    tokio::spawn(webhooks::run(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(&state.cfg.bind_addr).await?;
     tracing::info!("BatchMail berjalan di http://{}", state.cfg.bind_addr);

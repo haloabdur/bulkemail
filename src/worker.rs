@@ -68,11 +68,15 @@ pub async fn step(state: &AppState, credits: &mut HashMap<String, f64>) -> Resul
             .fetch_one(&state.db)
             .await?;
             if remaining == 0 {
-                sqlx::query("UPDATE batches SET status = 'completed', finished_at = ? WHERE id = ? AND status IN ('queued','sending')")
+                let done = sqlx::query("UPDATE batches SET status = 'completed', finished_at = ? WHERE id = ? AND status IN ('queued','sending')")
                     .bind(now())
                     .bind(&batch.id)
                     .execute(&state.db)
-                    .await?;
+                    .await?
+                    .rows_affected();
+                if done > 0 {
+                    crate::webhooks::batch_completed(&state.db, &batch.id).await;
+                }
             }
             continue;
         }

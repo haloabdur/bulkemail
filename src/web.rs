@@ -8,6 +8,7 @@ use crate::error::PageResult;
 use crate::mailer::Outcome;
 use crate::unsubscribe;
 use crate::util::{fmt_num, fmt_opt_time, fmt_time, mask_email, now, parse_local_datetime};
+use crate::webhooks;
 use crate::worker;
 use askama::Template;
 use axum::extract::{Multipart, Path, Query, State};
@@ -32,6 +33,8 @@ pub fn router() -> Router<AppState> {
         .route("/batches/{id}/{action}", post(batch_action))
         .route("/api-keys", get(keys_page).post(key_create))
         .route("/api-keys/{id}/revoke", post(key_revoke))
+        .route("/api-keys/{id}/webhook", post(key_webhook))
+        .route("/api-keys/{id}/webhook/test", post(key_webhook_test))
         .route("/settings", get(settings_page))
         .route("/settings/test-smtp", post(test_smtp))
         .route(
@@ -69,6 +72,11 @@ pub(crate) fn notice(code: Option<&str>) -> Option<String> {
         "retried" => "Penerima yang gagal dimasukkan lagi ke antrean.",
         "not_cancellable" => "Batch ini sudah selesai dan tidak bisa dibatalkan.",
         "revoked" => "API key dicabut. Sistem yang memakainya tidak bisa mengirim lagi.",
+        "webhook_saved" => "Webhook disimpan.",
+        "webhook_off" => "Webhook dimatikan.",
+        "webhook_test" => {
+            "Event tes diantrekan. Statusnya muncul di daftar pengiriman dalam beberapa detik (muat ulang halaman)."
+        }
         "domain_added" => {
             "Domain ditambahkan. Pasang record DNS di bawah (manual atau lewat Cloudflare), lalu periksa ulang."
         }
@@ -872,10 +880,77 @@ struct KeysPage {
     error: Option<String>,
     new_key: Option<(String, String)>,
     keys: Vec<KeyRow>,
+    hooks: Vec<HookRow>,
     domains: Vec<(i64, String)>,
     base_url: String,
     curl_example: String,
     response_example: String,
+}
+
+struct HookDelivery {
+    event: String,
+    status: &'static str,
+    status_class: &'static str,
+    attempts: i64,
+    time: String,
+    error: String,
+}
+
+struct HookRow {
+    id: i64,
+    name: String,
+    url: String,
+    /// Empty until a URL has been saved once.
+    secret: String,
+    recent: Vec<HookDelivery>,
+}
+
+async fn hook_rows(state: &AppState, list: &[auth::ApiKey]) -> PageResult<Vec<HookRow>> {
+    let mut rows = Vec::new();
+    for k in list {
+        let url: Option<String> =
+            sqlx::query_scalar("SELECT webhook_url FROM api_keys WHERE id = ?")
+                .bind(k.id)
+                .fetch_one(&state.db)
+                .await?;
+        let recent: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT event, status, attempts, created_at, last_error FROM webhook_deliveries
+             WHERE api_key_id = ? ORDER BY id DESC LIMIT 5",
+        )
+        .bind(k.id)
+        .fetch_all(&state.db)
+        .await?;
+        rows.push(HookRow {
+            id: k.id,
+            name: k.name.clone(),
+            url: url.unwrap_or_default(),
+            secret: webhooks::secret(state, k.id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            recent: recent
+                .into_iter()
+                .map(|(event, status, attempts, at, err)| {
+                    let (status, status_class) = match status.as_str() {
+                        "delivered" => ("Terkirim", "blue"),
+                        "pending" => ("Menunggu / coba ulang", "gray"),
+                        "dropped" => ("Dibatalkan", "gray"),
+                        _ => ("Gagal", "orange"),
+                    };
+                    HookDelivery {
+                        event,
+                        status,
+                        status_class,
+                        attempts,
+                        time: fmt_time(at, state.cfg.tz_offset_hours),
+                        error: err.unwrap_or_default(),
+                    }
+                })
+                .collect(),
+        });
+    }
+    Ok(rows)
 }
 
 async fn keys_view(state: &AppState, user: &User) -> PageResult<KeysPage> {
@@ -884,6 +959,7 @@ async fn keys_view(state: &AppState, user: &User) -> PageResult<KeysPage> {
             .fetch_all(&state.db)
             .await?;
     let domain_list = domains::list(state).await?;
+    let hooks = hook_rows(state, &list).await?;
     let mut keys = Vec::new();
     for k in list {
         let usage: i64 = sqlx::query_scalar(
@@ -945,6 +1021,7 @@ async fn keys_view(state: &AppState, user: &User) -> PageResult<KeysPage> {
         error: None,
         new_key: None,
         keys,
+        hooks,
         domains: domain_list.into_iter().map(|d| (d.id, d.name)).collect(),
         base_url: base,
         curl_example,
@@ -968,6 +1045,7 @@ struct KeyForm {
     mode: Option<String>,
     domain_id: Option<String>,
     daily_limit: Option<String>,
+    webhook_url: Option<String>,
 }
 
 async fn key_create(
@@ -981,8 +1059,24 @@ async fn key_create(
         .and_then(|l| l.trim().replace('.', "").parse::<i64>().ok())
         .filter(|l| *l > 0);
     let test = f.mode.as_deref() == Some("test");
+    let webhook_url = f
+        .webhook_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty());
+    // Check the URL first so a typo does not leave a key behind that nobody saw.
+    if let Some(u) = webhook_url
+        && let Err(e) = webhooks::valid_url(u)
+    {
+        let mut page = keys_view(&state, &user).await?;
+        page.error = Some(e.to_string());
+        return render(page);
+    }
     match auth::create_key(&state.db, &f.name, test, domain_id, limit).await {
         Ok(key) => {
+            if let Some(u) = webhook_url {
+                webhooks::set_url(&state, key.id, Some(u)).await?;
+            }
             let mut page = keys_view(&state, &user).await?;
             page.new_key = Some((f.name.trim().to_string(), key.plaintext));
             render(page)
@@ -993,6 +1087,59 @@ async fn key_create(
             render(page)
         }
     }
+}
+
+#[derive(Deserialize)]
+struct WebhookForm {
+    webhook_url: Option<String>,
+}
+
+async fn key_webhook(
+    State(state): State<AppState>,
+    user: User,
+    Path(id): Path<i64>,
+    Form(f): Form<WebhookForm>,
+) -> PageResult {
+    let url = f
+        .webhook_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty());
+    match webhooks::set_url(&state, id, url).await {
+        Ok(()) => Ok(redirect_msg(
+            "/api-keys",
+            if url.is_some() {
+                "webhook_saved"
+            } else {
+                "webhook_off"
+            },
+        )),
+        Err(e) => {
+            let mut page = keys_view(&state, &user).await?;
+            page.error = Some(e.to_string());
+            render(page)
+        }
+    }
+}
+
+async fn key_webhook_test(
+    State(state): State<AppState>,
+    user: User,
+    Path(id): Path<i64>,
+) -> PageResult {
+    let has_url: Option<String> =
+        sqlx::query_scalar("SELECT webhook_url FROM api_keys WHERE id = ? AND revoked_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
+    if has_url.is_none() {
+        let mut page = keys_view(&state, &user).await?;
+        page.error = Some("Simpan URL webhook dulu sebelum mengirim event tes.".into());
+        return render(page);
+    }
+    webhooks::enqueue_test(&state, id).await?;
+    Ok(redirect_msg("/api-keys", "webhook_test"))
 }
 
 async fn key_revoke(State(state): State<AppState>, _user: User, Path(id): Path<i64>) -> PageResult {

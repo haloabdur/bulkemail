@@ -28,12 +28,13 @@ Tujuannya sederhana: siapa pun yang punya sistem (HR, toko online, klinik, sekol
 10. [API](#api)
 11. [Variabel template & unsubscribe](#variabel-template--unsubscribe)
 12. [Bounce & komplain](#bounce--komplain)
-13. [Status batch & penerima](#status-batch--penerima)
-14. [Tips deliverability](#tips-deliverability)
-15. [Backup, update, dan troubleshooting](#backup-update-dan-troubleshooting)
-16. [Pengembangan](#pengembangan)
-17. [Batasan saat ini](#batasan-saat-ini)
-18. [Lisensi](#lisensi)
+13. [Webhook status ke sistem Anda](#webhook-status-ke-sistem-anda)
+14. [Status batch & penerima](#status-batch--penerima)
+15. [Tips deliverability](#tips-deliverability)
+16. [Backup, update, dan troubleshooting](#backup-update-dan-troubleshooting)
+17. [Pengembangan](#pengembangan)
+18. [Batasan saat ini](#batasan-saat-ini)
+19. [Lisensi](#lisensi)
 
 ---
 
@@ -397,6 +398,59 @@ Alamat dengan sumber `bounce`/`complaint` dilewati untuk semua jenis email (mark
 
 `type` boleh `hard_bounce`, `soft_bounce`, atau `complaint`. Jika `message_id` tidak ada, field `email` tetap bisa men-suppress alamat untuk hard bounce `5.1.x` dan komplain. Cara menyambungkan ke Stalwart dan menguji lewat Postman: [`docs/POSTMAN.md`](docs/POSTMAN.md).
 
+## Webhook status ke sistem Anda
+
+Sistem Anda tidak perlu polling `GET /batches/{id}`. Atur **URL webhook** per API key (dashboard › *API keys*, saat membuat key atau di bagian *Webhook status*), dan BatchMail akan `POST` JSON ke URL itu:
+
+| Event | Kapan |
+|---|---|
+| `batch.completed` | Semua penerima satu batch sudah diproses. Berisi `counts`. |
+| `recipient.bounced` | Email yang diterima Stalwart ditolak belakangan. Berisi `email`, `code`, `reason`, `suppressed`. |
+| `recipient.complained` | Penerima melaporkan email sebagai spam. |
+| `webhook.test` | Tombol *Kirim event tes* di dashboard. |
+
+```json
+{
+  "id": "evt_8bbE963eyBg7q1BLV8Mg",
+  "event": "recipient.bounced",
+  "created_at": "2026-11-08T12:25:55+00:00",
+  "data": {
+    "batch_id": "b_Uata1lUxdU",
+    "email": "budi@contoh.co.id",
+    "message_id": "<b_Uata1lUxdU.2.RR8sA8QA@domainanda.id>",
+    "code": "5.1.1",
+    "reason": "550 5.1.1 User unknown",
+    "suppressed": true
+  }
+}
+```
+
+**Tanda tangan.** Setiap request membawa `X-BatchMail-Signature: t=<unix>,v1=<hex>`, dengan `v1 = HMAC_SHA256(rahasia, "<t>.<body mentah>")`. Rahasia (`whsec_…`) ada di dashboard, di bawah URL webhook key itu. Tolak request yang tanda tangannya salah atau `t`-nya lebih dari 5 menit. Verifikasi memakai **body mentah**, sebelum di-parse:
+
+```python
+import hmac, hashlib, time
+
+def verify(raw_body: bytes, header: str, secret: str) -> bool:
+    t, v1 = header[2:].split(",v1=")
+    expected = hmac.new(secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(v1, expected) and abs(time.time() - int(t)) < 300
+```
+
+```js
+const crypto = require("crypto");
+function verify(rawBody, header, secret) {
+  const [t, v1] = header.slice(2).split(",v1=");
+  const expected = crypto.createHmac("sha256", secret).update(`${t}.${rawBody}`).digest("hex");
+  return v1.length === expected.length
+    && crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected))
+    && Math.abs(Date.now() / 1000 - t) < 300;
+}
+```
+
+**Pengiriman.** Balas `2xx` secepatnya (batas waktu 10 detik) dan proses di belakang. Selain 2xx, BatchMail mencoba ulang setelah 1 menit, 5 menit, 30 menit, 2 jam, dan 6 jam (6 percobaan, ±9 jam), lalu menandainya gagal. Event disimpan di database dulu, jadi restart BatchMail atau sistem Anda yang sedang mati tidak menghilangkan event. Pengiriman **minimal satu kali**: event yang sama bisa tiba dua kali, jadi buang duplikat berdasarkan `id` (juga ada di header `X-BatchMail-Event-Id`). Redirect tidak diikuti. Status pengiriman terbaru tiap key terlihat di dashboard, dan data pengiriman dibersihkan setelah 7 hari (30 hari bila gagal).
+
+Webhook ikut jalan untuk key *Test*, jadi integrasi bisa dicoba di staging. Event `batch.completed` juga dikirim untuk email tunggal lewat `/emails`. Hanya admin dashboard yang mengatur URL (bukan pemanggil API), karena BatchMail yang membuat koneksi keluar ke alamat itu.
+
 ## Status batch & penerima
 
 | Batch | Arti |
@@ -481,7 +535,7 @@ Struktur kode:
 ## Batasan saat ini
 
 - **Bounce dari Stalwart belum diuji dengan Stalwart sungguhan.** Endpoint `/hooks/bounce` sudah diuji lewat simulasi dan DSN mentah, tetapi skema event webhook Stalwart belum dicocokkan. Ikuti langkah verifikasi di [`docs/POSTMAN.md`](docs/POSTMAN.md#c-menyambungkan-bounce-dari-stalwart).
-- Belum ada webhook status ke sistem Anda. Pakai `GET /batches/{id}` untuk polling.
+- Webhook status hanya untuk batch yang dibuat lewat API (dashboard tidak punya penerima webhook). Event yang dikirim: `batch.completed`, `recipient.bounced`, `recipient.complained`.
 - Belum ada "list tersimpan" (kontak permanen). Setiap batch membawa daftarnya sendiri.
 - Satu workspace: semua user dashboard melihat semua batch, key, dan domain.
 - Pengaturan SMTP dibaca dari `.env` (halaman *Koneksi Stalwart* hanya menampilkan dan menguji).

@@ -367,13 +367,14 @@ async fn record(
 async fn find_recipient(
     state: &AppState,
     ids: &[String],
-) -> Result<Option<(i64, String, String)>, sqlx::Error> {
+) -> Result<Option<(i64, String, String, String)>, sqlx::Error> {
     for id in ids {
-        let row: Option<(i64, String, String)> =
-            sqlx::query_as("SELECT id, email, message_id FROM recipients WHERE message_id = ?")
-                .bind(id)
-                .fetch_optional(&state.db)
-                .await?;
+        let row: Option<(i64, String, String, String)> = sqlx::query_as(
+            "SELECT id, email, message_id, batch_id FROM recipients WHERE message_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?;
         if row.is_some() {
             return Ok(row);
         }
@@ -393,7 +394,7 @@ async fn apply(state: &AppState, ev: &Event, log_all: bool) -> Result<&'static s
     let ids = find_message_ids(&ev.text);
     let found = find_recipient(state, &ids).await?;
 
-    let Some((rid, email, message_id)) = found else {
+    let Some((rid, email, message_id, batch_id)) = found else {
         // No known Message-ID. Only an explicit `email` field can still suppress an address.
         if let (Some(email), true) = (&ev.email, verdict.suppress) {
             let source = if verdict.kind == Kind::Complaint {
@@ -457,7 +458,30 @@ async fn apply(state: &AppState, ev: &Event, log_all: bool) -> Result<&'static s
     if verdict.suppress {
         web::suppress(&state.db, &email, Some(&text), source).await?;
     }
-    let outcome = if changed == 0 { "duplicate" } else { outcome };
+    let outcome = if changed == 0 {
+        "duplicate"
+    } else {
+        // Tell the sending system, once per recipient (a retried webhook has changed == 0).
+        crate::webhooks::enqueue_for_batch(
+            &state.db,
+            &batch_id,
+            if verdict.kind == Kind::Complaint {
+                "recipient.complained"
+            } else {
+                "recipient.bounced"
+            },
+            json!({
+                "batch_id": batch_id,
+                "email": email,
+                "message_id": message_id,
+                "code": verdict.code,
+                "reason": detail,
+                "suppressed": verdict.suppress,
+            }),
+        )
+        .await;
+        outcome
+    };
     record(
         state,
         outcome,

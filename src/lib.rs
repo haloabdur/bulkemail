@@ -16,6 +16,7 @@ pub mod unsubscribe;
 pub mod util;
 pub mod web;
 pub mod web_domains;
+pub mod webhooks;
 pub mod worker;
 
 use axum::Router;

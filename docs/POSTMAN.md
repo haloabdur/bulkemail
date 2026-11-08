@@ -135,14 +135,18 @@ Pola yang disarankan untuk daftar email yang Anda punya sendiri:
 ```
 sistem Anda ──POST /api/v1/batches──► BatchMail ──► Stalwart ──► penerima
      ▲                                    │              │
-     └── GET /batches/{id} (polling) ◄────┘              └─ bounce ─► POST /hooks/bounce
+     └── webhook: batch.completed, ◄──────┘              └─ bounce ─► POST /hooks/bounce
+         recipient.bounced / .complained
 ```
 
 1. **Satu API key per sistem** (dashboard › API keys). Pakai key *live*, batasi ke satu domain, dan isi batas harian.
 2. **Kirim batch**: `POST /api/v1/batches` dengan `recipients: [{ "email", "vars" }]`, maksimal 10.000 per request. Pecah daftar yang lebih besar jadi beberapa batch. Simpan `id` dari respons.
 3. **Baca `rejected`** di respons: `invalid_email`, `duplicate`, `unsubscribed`, `bounced`. Hapus alamat `invalid_email` dan `bounced` dari daftar Anda.
-4. **Pantau**: `GET /api/v1/batches/{id}` tiap beberapa menit sampai `status: completed`. Bounce biasanya tiba **setelah** `completed`, dari menit sampai beberapa jam, jadi cek lagi nanti.
-5. **Ambil bounce** untuk membersihkan daftar Anda sendiri: `GET /api/v1/batches/{id}/recipients?status=bounced` dan `?status=complained`. Lakukan 1 hari setelah kirim, lalu sekali lagi 3 hari setelahnya.
+4. **Pasang webhook** (disarankan): di dashboard › *API keys* › *Webhook status*, isi URL endpoint di sistem Anda. Salin rahasia `whsec_…`, dan pakai untuk memverifikasi tanda tangan (contoh kode ada di README › Webhook status). Klik **Kirim event tes** untuk memastikan sampai. Anda lalu menerima:
+   - `batch.completed` saat batch selesai dikirim ke Stalwart.
+   - `recipient.bounced` dan `recipient.complained` saat kabar bounce atau komplain tiba, dari menit sampai beberapa jam kemudian. Hapus alamat itu dari daftar Anda (`suppressed: true` berarti BatchMail juga sudah menyetopnya).
+   Buang duplikat berdasarkan `id` event. Untuk mencoba tanpa membuat endpoint, pakai layanan penampung webhook seperti webhook.site.
+5. **Tanpa webhook** (cadangan): `GET /api/v1/batches/{id}` sampai `status: completed`, lalu `GET /api/v1/batches/{id}/recipients?status=bounced` dan `?status=complained`. Bounce tiba **setelah** `completed`, jadi cek lagi 1 hari dan 3 hari setelah kirim.
 6. **Jadwal**: `send_at` (RFC 3339) untuk kirim terjadwal, `rate_per_minute` untuk mengatur kecepatan.
 
 Contoh minimal dari sistem Anda (bash):

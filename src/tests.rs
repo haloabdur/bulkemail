@@ -648,3 +648,329 @@ async fn bounce_webhook_suppresses_an_explicit_email_without_message_id() {
         Some("bounce")
     );
 }
+
+// ---------- outgoing webhooks ----------
+
+type Received = Vec<(HashMap<String, String>, String)>;
+
+#[derive(Clone, Default)]
+struct Sink {
+    got: std::sync::Arc<std::sync::Mutex<Received>>,
+    fail: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+async fn sink_handler(
+    axum::extract::State(s): axum::extract::State<Sink>,
+    headers: axum::http::HeaderMap,
+    body: String,
+) -> StatusCode {
+    let h = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    s.got.lock().unwrap().push((h, body));
+    if s.fail.load(std::sync::atomic::Ordering::SeqCst) {
+        StatusCode::INTERNAL_SERVER_ERROR
+    } else {
+        StatusCode::OK
+    }
+}
+
+async fn start_sink() -> (String, Sink) {
+    let sink = Sink::default();
+    let router = axum::Router::new()
+        .route("/hook", axum::routing::post(sink_handler))
+        .with_state(sink.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/hook", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (url, sink)
+}
+
+async fn outbox(state: &AppState) -> Vec<(String, String, i64)> {
+    sqlx::query_as("SELECT event, status, attempts FROM webhook_deliveries ORDER BY id")
+        .fetch_all(&state.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn webhooks_report_completion_and_bounces_with_signature_and_retries() {
+    let (state, router) = setup().await;
+    let (url, sink) = start_sink().await;
+    let client = crate::webhooks::client().unwrap();
+
+    let key = auth::create_key(&state.db, "Toko", true, None, None)
+        .await
+        .unwrap();
+    crate::webhooks::set_url(&state, key.id, Some(&url))
+        .await
+        .unwrap();
+    let secret = crate::webhooks::secret(&state, key.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(secret.starts_with("whsec_"));
+    // Setting the URL again keeps the secret.
+    crate::webhooks::set_url(&state, key.id, Some(&url))
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::webhooks::secret(&state, key.id)
+            .await
+            .unwrap()
+            .unwrap(),
+        secret
+    );
+
+    // A batch finishes -> batch.completed.
+    let (status, _, body) = send(
+        &router,
+        api(
+            "POST",
+            "/api/v1/batches",
+            Some(&key.plaintext),
+            Some(batch_body(
+                "info@domainanda.id",
+                &["a@contoh.com", "b@contoh.com"],
+                "marketing",
+            )),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let batch_id = serde_json::from_str::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut credits = HashMap::new();
+    for _ in 0..3 {
+        worker::step(&state, &mut credits).await.unwrap();
+    }
+    assert_eq!(
+        outbox(&state).await,
+        vec![("batch.completed".into(), "pending".into(), 0)]
+    );
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        1
+    );
+
+    let (headers, body) = sink.got.lock().unwrap()[0].clone();
+    let event: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(event["event"], "batch.completed");
+    assert_eq!(event["data"]["batch_id"], batch_id.as_str());
+    assert_eq!(event["data"]["counts"]["sent"], 2);
+    assert_eq!(headers["x-batchmail-event"], "batch.completed");
+    assert_eq!(
+        headers["x-batchmail-event-id"],
+        event["id"].as_str().unwrap()
+    );
+    let sig = &headers["x-batchmail-signature"];
+    let (t, v1) = sig.strip_prefix("t=").unwrap().split_once(",v1=").unwrap();
+    assert_eq!(
+        v1,
+        crate::webhooks::sign(&secret, t.parse().unwrap(), &body)
+    );
+    assert_eq!(outbox(&state).await[0].1, "delivered");
+    // Completed once: more worker ticks add nothing.
+    worker::step(&state, &mut credits).await.unwrap();
+    assert_eq!(outbox(&state).await.len(), 1);
+
+    // A bounce -> recipient.bounced, once; the retried bounce adds nothing.
+    let mid: String =
+        sqlx::query_scalar("SELECT message_id FROM recipients WHERE email = 'a@contoh.com'")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+    let bounce =
+        json!({"type":"hard_bounce","message_id":mid,"code":"5.1.1","reason":"User unknown"})
+            .to_string();
+    for _ in 0..2 {
+        let (status, _, _) = send(
+            &router,
+            hook("POST", "/hooks/bounce", Some("test-bounce-token"), &bounce),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        1
+    );
+    let (_, body) = sink.got.lock().unwrap()[1].clone();
+    let event: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(event["event"], "recipient.bounced");
+    assert_eq!(event["data"]["email"], "a@contoh.com");
+    assert_eq!(event["data"]["code"], "5.1.1");
+    assert_eq!(event["data"]["suppressed"], true);
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        0
+    );
+
+    // Receiver down: the event stays queued with a backoff, then arrives (same event id).
+    sink.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::webhooks::enqueue_test(&state, key.id).await.unwrap();
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        1
+    );
+    let rows = outbox(&state).await;
+    assert_eq!(rows[2], ("webhook.test".into(), "pending".into(), 1));
+    let err: String = sqlx::query_scalar("SELECT last_error FROM webhook_deliveries WHERE id = 3")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert!(err.contains("500"), "{err}");
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        0,
+        "backoff not over"
+    );
+    sqlx::query("UPDATE webhook_deliveries SET next_attempt_at = 0 WHERE id = 3")
+        .execute(&state.db)
+        .await
+        .unwrap();
+    sink.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        crate::webhooks::deliver_due(&state, &client).await.unwrap(),
+        1
+    );
+    assert_eq!(
+        outbox(&state).await[2],
+        ("webhook.test".into(), "delivered".into(), 2)
+    );
+    let got = sink.got.lock().unwrap().clone();
+    assert_eq!(got.len(), 4);
+    assert_eq!(
+        got[2].0["x-batchmail-event-id"],
+        got[3].0["x-batchmail-event-id"]
+    );
+
+    // Giving up after the last attempt.
+    crate::webhooks::enqueue_test(&state, key.id).await.unwrap();
+    sink.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..6 {
+        sqlx::query("UPDATE webhook_deliveries SET next_attempt_at = 0 WHERE status = 'pending'")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        crate::webhooks::deliver_due(&state, &client).await.unwrap();
+    }
+    assert_eq!(
+        outbox(&state).await[3],
+        ("webhook.test".into(), "failed".into(), 6)
+    );
+
+    // Turning the webhook off drops what is still queued and queues nothing new.
+    sink.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    crate::webhooks::enqueue_test(&state, key.id).await.unwrap();
+    crate::webhooks::set_url(&state, key.id, None)
+        .await
+        .unwrap();
+    crate::webhooks::deliver_due(&state, &client).await.unwrap();
+    assert_eq!(outbox(&state).await[4].1, "dropped");
+    let (_, _, body) = send(
+        &router,
+        api(
+            "POST",
+            "/api/v1/batches",
+            Some(&key.plaintext),
+            Some(batch_body(
+                "info@domainanda.id",
+                &["c@contoh.com"],
+                "marketing",
+            )),
+        ),
+    )
+    .await;
+    assert!(body.contains("accepted"), "{body}");
+    for _ in 0..3 {
+        worker::step(&state, &mut credits).await.unwrap();
+    }
+    assert_eq!(outbox(&state).await.len(), 5);
+}
+
+#[tokio::test]
+async fn webhook_settings_in_the_dashboard() {
+    let (state, router) = setup().await;
+    auth::upsert_user(&state.db, "admin@domainanda.id", "rahasia-sekali")
+        .await
+        .unwrap();
+    let (_, headers, _) = send(
+        &router,
+        Request::post("/login")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(
+                "email=admin%40domainanda.id&password=rahasia-sekali&remember=1",
+            ))
+            .unwrap(),
+    )
+    .await;
+    let cookie = headers["set-cookie"].split(';').next().unwrap().to_string();
+    let form = |path: &str, body: &str| {
+        Request::post(path)
+            .header(header::COOKIE, &cookie)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    // A bad URL is refused before any key is created.
+    let (status, _, body) = send(
+        &router,
+        form(
+            "/api-keys",
+            "name=HR&mode=test&webhook_url=ftp%3A%2F%2Fx.id",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("harus diawali http"), "{body}");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM api_keys")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+
+    // A good URL at creation time.
+    let (status, _, body) = send(
+        &router,
+        form(
+            "/api-keys",
+            "name=HR&mode=test&webhook_url=https%3A%2F%2Fhr.example.id%2Fhooks%2Fbm",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("whsec_"), "secret is shown to the admin");
+    assert!(body.contains("https://hr.example.id/hooks/bm"));
+    let id: i64 = sqlx::query_scalar("SELECT id FROM api_keys")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+
+    // Test event, then change and clear the URL.
+    let (status, headers, _) =
+        send(&router, form(&format!("/api-keys/{id}/webhook/test"), "")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{headers:?}");
+    assert_eq!(outbox(&state).await.len(), 1);
+    let (_, headers, _) = send(
+        &router,
+        form(
+            &format!("/api-keys/{id}/webhook"),
+            "webhook_url=http%3A%2F%2Flocalhost%3A9%2Fx",
+        ),
+    )
+    .await;
+    assert!(headers["location"].contains("webhook_saved"));
+    let (_, headers, _) = send(
+        &router,
+        form(&format!("/api-keys/{id}/webhook"), "webhook_url="),
+    )
+    .await;
+    assert!(headers["location"].contains("webhook_off"));
+    let (_, _, body) = send(&router, form(&format!("/api-keys/{id}/webhook/test"), "")).await;
+    assert!(body.contains("Simpan URL webhook dulu"), "{body}");
+}
