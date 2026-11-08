@@ -149,7 +149,7 @@
           ]
         },
         {
-          "name": "Status batch",
+          "name": "Status batch (tunggu 2-5 detik setelah buat batch)",
           "request": {
             "method": "GET",
             "header": [],
@@ -174,7 +174,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"200\", () => pm.response.to.have.status(200));",
-                  "console.log(JSON.stringify(pm.response.json().counts));"
+                  "const j = pm.response.json();",
+                  "pm.test(\"Semua 3 terkirim ke Stalwart\", () => pm.expect(j.counts.sent).to.eql(3));"
                 ]
               }
             }
@@ -220,105 +221,6 @@
           ]
         },
         {
-          "name": "Hanya yang bounce",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=bounced",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "batches",
-                "{{batchId}}",
-                "recipients"
-              ],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "bounced"
-                }
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Hanya yang komplain",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=complained",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "batches",
-                "{{batchId}}",
-                "recipients"
-              ],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "complained"
-                }
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Kirim ulang ke alamat yang sudah bounce (harus ditolak)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/batches",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "batches"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"from\": \"{{fromAddress}}\",\n  \"subject\": \"Kirim ulang\",\n  \"text\": \"Halo\",\n  \"recipients\": [ { \"email\": \"{{emailBounce}}\" }, { \"email\": \"baru@contoh.co.id\" } ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "pm.test(\"Alamat bounce ditolak\", () => pm.expect(j.rejected.map(r => r.reason)).to.include(\"bounced\"));"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "Kirim satu email (transaksional)",
           "request": {
             "method": "POST",
@@ -349,27 +251,18 @@
                 }
               }
             }
-          }
-        },
-        {
-          "name": "Batalkan batch",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "batches",
-                "{{batchId}}"
-              ]
-            },
-            "description": ""
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -572,7 +465,18 @@
                 }
               ]
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"DSN yang sama dengan langkah pertama = duplicate\", () => pm.expect(pm.response.json().results.duplicate).to.eql(1));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Log event bounce terbaru",
@@ -607,7 +511,19 @@
                 }
               ]
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Log memuat bounce, komplain, dan soft\", () => { const o = d.map(e => e.outcome); pm.expect(o).to.include.members([\"bounced\",\"complained\",\"soft\"]); });"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Tanpa token (harus 401)",
@@ -650,6 +566,201 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Hasil setelah bounce",
+      "description": "Jalankan setelah folder 3.",
+      "item": [
+        {
+          "name": "Status batch (cek hitungan bounce)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test(\"sent 1, bounced 1, complained 1\", () => {",
+                  "  pm.expect(j.counts.sent).to.eql(1);",
+                  "  pm.expect(j.counts.bounced).to.eql(1);",
+                  "  pm.expect(j.counts.complained).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hanya yang bounce",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=bounced",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}",
+                "recipients"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "bounced"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Satu penerima bounce\", () => { pm.expect(d.length).to.eql(1); pm.expect(d[0].smtp_response).to.include(\"5.1.1\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hanya yang komplain",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=complained",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}",
+                "recipients"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "complained"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Satu penerima komplain\", () => pm.expect(pm.response.json().data.length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kirim ulang ke alamat yang sudah bounce (harus ditolak)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"{{fromAddress}}\",\n  \"subject\": \"Kirim ulang\",\n  \"text\": \"Halo\",\n  \"recipients\": [ { \"email\": \"{{emailBounce}}\" }, { \"email\": \"baru@contoh.co.id\" } ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test(\"Alamat bounce ditolak\", () => pm.expect(j.rejected.map(r => r.reason)).to.include(\"bounced\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Batalkan batch (409 bila sudah selesai, itu normal)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"409 karena batch sudah selesai\", () => pm.response.to.have.status(409));"
                 ]
               }
             }

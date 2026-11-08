@@ -58,34 +58,39 @@ Variabel lain (`emailOk`, `emailBounce`, `emailSpam`, `batchId`, `messageId…`)
 
 ### B2. Jalankan berurutan
 
+Klik koleksi › **Run**, atau jalankan request satu per satu dari atas ke bawah. Beri jeda 2–5 detik setelah *Buat batch*. Semua request punya pengecekan otomatis (tab *Test Results*), dan semuanya harus hijau.
+
 **Folder 1 · Cek koneksi**
-1. **Domain yang boleh dipakai key ini** → harus `200` dan domain Anda muncul. `401` berarti key salah.
+1. **Domain yang boleh dipakai key ini** → `200` dan domain Anda muncul. `401` berarti key salah.
 
 **Folder 2 · Kirim batch**
 
 2. **Buat batch (3 penerima)** → `202`, `accepted: 3`. `batchId` tersimpan otomatis.
-   Jika `422 domain_not_verified`, domain belum lolos. Lihat A.3.
-3. Tunggu 2–5 detik, lalu **Status batch** → `status: completed`, `counts.sent: 3`.
-4. **Daftar penerima + simpan message_id** → tiap penerima punya `message_id` seperti `<b_AbCdEfGhIj.2.xxxxxxxx@domainanda.id>`. Skrip koleksi menyimpannya untuk langkah bounce. ID inilah yang dipakai BatchMail untuk mengenali email mana yang bounce.
+   `422 domain_not_verified` berarti domain belum lolos. Lihat A.3.
+3. **Status batch** → `counts.sent: 3`. Jika masih `queued`, tunggu sebentar lalu kirim ulang request ini.
+4. **Daftar penerima + simpan message_id** → tiap penerima punya `message_id` seperti `<b_AbCdEfGhIj.2.xxxxxxxx@domainanda.id>`. Skrip koleksi menyimpannya untuk folder 3. ID inilah yang dipakai BatchMail untuk mengenali email mana yang bounce.
+5. **Kirim satu email (transaksional)** → `202`.
 
-**Folder 3 · Simulasi bounce**
+**Folder 3 · Simulasi bounce** (memakai `bounceToken`, bukan `apiKey`)
 
-Request di folder ini memakai `bounceToken`, bukan `apiKey`.
+6. **Hard bounce: user unknown** → `{"received":1,"results":{"bounced":1}}`.
+7. **Soft bounce** → `results.soft: 1`. Hanya dicatat, status penerima tidak berubah.
+8. **Komplain spam** → `results.complained: 1`.
+9. **Email DSN mentah** → `results.duplicate: 1`. Isinya sama dengan langkah 6 dalam format email DSN, jadi ini juga membuktikan webhook yang diulang tidak dihitung dua kali.
+10. **Log event bounce terbaru** → melihat apa yang diterima dan diputuskan.
+11. **Tanpa token** → `401`.
 
-5. **Hard bounce: user unknown** → `{"received":1,"results":{"bounced":1}}`.
-6. **Soft bounce** → `results.soft: 1`. Hanya dicatat, status penerima tidak berubah.
-7. **Komplain spam** → `results.complained: 1`.
-8. **Email DSN mentah** → `results.duplicate: 1`. Payload yang sama persis dengan langkah 5 dalam format email DSN, jadi ini juga membuktikan webhook yang diulang tidak dihitung dua kali.
-9. **Log event bounce terbaru** → melihat apa yang diterima dan diputuskan.
-10. **Tanpa token** → `401`.
+**Folder 4 · Hasil setelah bounce**
 
-**Kembali ke folder 2** untuk melihat hasilnya:
+12. **Status batch** → `counts`: `sent: 1, bounced: 1, complained: 1`.
+13. **Hanya yang bounce** → penerima `budi@…`, `smtp_response: "Bounce 5.1.1: …"`.
+14. **Hanya yang komplain** → penerima `citra@…`.
+15. **Kirim ulang ke alamat yang sudah bounce** → `rejected: [{ "reason": "bounced" }]`. Inilah manfaat utamanya: alamat mati tidak dikirimi lagi.
+16. **Batalkan batch** → `409`. Itu normal, karena batch sudah selesai dan tidak bisa dibatalkan.
 
-11. **Status batch** → `counts` sekarang `sent: 1, bounced: 1, complained: 1`.
-12. **Hanya yang bounce** → penerima `budi@…`, `smtp_response: "Bounce 5.1.1: …"`.
-13. **Kirim ulang ke alamat yang sudah bounce** → `rejected: [{ "reason": "bounced" }]`. Inilah manfaat utamanya: alamat mati tidak dikirimi lagi.
+Di dashboard: halaman batch menampilkan kolom *Bounce / komplain*, dan menu *Unsubscribe* menampilkan alamat dengan sumber `bounce` dan `complaint`.
 
-Di dashboard: halaman batch menampilkan kolom *Bounce / komplain*, dan menu *Unsubscribe* menampilkan alamat dengan sumber `bounce` dan `complaint`. Alamat bisa dihapus dari daftar itu bila perlu.
+**Menjalankan ulang:** `emailBounce` dan `emailSpam` sekarang ada di daftar suppression, jadi proses kedua akan gagal di langkah 2. Ganti kedua alamat itu di variabel koleksi (mis. `budi2@…`, `citra2@…`), atau hapus keduanya dari menu *Unsubscribe*.
 
 ### B3. Aturan yang perlu Anda tahu
 
@@ -168,4 +173,5 @@ Aturan praktis yang menjaga reputasi:
 | `422 domain_not_verified` | SPF/DKIM domain belum lolos |
 | `422 no_valid_recipients` | Semua alamat tidak valid, duplikat, atau sudah tersuppress |
 | Folder 3 hasilnya `unmatched` | `messageId…` kosong. Jalankan *Daftar penerima + simpan message_id* dulu. |
+| Proses kedua gagal di *Buat batch* | Alamat uji sudah tersuppress dari proses pertama. Lihat catatan *Menjalankan ulang* di B2. |
 | `results.ignored` untuk event Stalwart | Event itu bukan kegagalan (normal), atau belum dikenali. Lihat C.3. |
