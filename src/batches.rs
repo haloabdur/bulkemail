@@ -9,7 +9,7 @@ use lettre::message::Mailbox;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sqlx::{FromRow, QueryBuilder, Sqlite};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -142,15 +142,14 @@ pub async fn create(state: &AppState, nb: NewBatch<'_>) -> Result<Created, ApiEr
         .clamp(1, 10_000);
 
     // Clean the list: invalid, duplicates, unsubscribed.
-    let suppressed: HashSet<String> = if nb.kind == Kind::Marketing {
-        sqlx::query_scalar("SELECT email FROM suppressions")
+    // Unsubscribes only apply to marketing; dead addresses (bounce/complaint) apply to everything.
+    let suppressed: HashMap<String, String> =
+        sqlx::query_as::<_, (String, String)>("SELECT email, source FROM suppressions")
             .fetch_all(&state.db)
             .await?
             .into_iter()
-            .collect()
-    } else {
-        HashSet::new()
-    };
+            .filter(|(_, source)| nb.kind == Kind::Marketing || is_dead_address(source))
+            .collect();
     let mut seen = HashSet::new();
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
@@ -166,10 +165,14 @@ pub async fn create(state: &AppState, nb: NewBatch<'_>) -> Result<Created, ApiEr
                 email,
                 reason: "duplicate",
             });
-        } else if suppressed.contains(&email) {
+        } else if let Some(source) = suppressed.get(&email) {
             rejected.push(Rejected {
                 email,
-                reason: "unsubscribed",
+                reason: if is_dead_address(source) {
+                    "bounced"
+                } else {
+                    "unsubscribed"
+                },
             });
         } else {
             accepted.push(RecipientInput {
@@ -365,12 +368,21 @@ pub struct Counts {
     pub failed: i64,
     pub skipped: i64,
     pub cancelled: i64,
+    /// Accepted by Stalwart, rejected later (hard bounce).
+    pub bounced: i64,
+    /// Recipient reported the message as spam.
+    pub complained: i64,
 }
 
 impl Counts {
     pub fn processed(&self) -> i64 {
-        self.sent + self.failed + self.skipped + self.cancelled
+        self.sent + self.failed + self.skipped + self.cancelled + self.bounced + self.complained
     }
+}
+
+/// Suppression sources that mean "this address cannot or must not receive mail".
+pub fn is_dead_address(source: &str) -> bool {
+    matches!(source, "bounce" | "complaint")
 }
 
 pub async fn get(db: &sqlx::SqlitePool, id: &str) -> sqlx::Result<Option<Batch>> {
@@ -396,6 +408,8 @@ pub async fn counts(db: &sqlx::SqlitePool, id: &str) -> sqlx::Result<Counts> {
             "failed" => c.failed = n,
             "skipped" => c.skipped = n,
             "cancelled" => c.cancelled = n,
+            "bounced" => c.bounced = n,
+            "complained" => c.complained = n,
             _ => {}
         }
     }

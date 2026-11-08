@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod batches;
+pub mod bounce;
 pub mod cloudflare;
 pub mod config;
 pub mod db;
@@ -51,6 +52,7 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", api::router())
+        .merge(bounce::router())
         .merge(web::router())
         .merge(web_domains::router())
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))

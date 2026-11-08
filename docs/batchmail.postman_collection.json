@@ -1,0 +1,661 @@
+{
+  "info": {
+    "name": "BatchMail",
+    "description": "Koleksi uji BatchMail: kirim batch, cek status, dan simulasi bounce. Lihat docs/POSTMAN.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{apiKey}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "apiKey",
+      "value": "bk_test_ISI_DI_SINI"
+    },
+    {
+      "key": "bounceToken",
+      "value": "ISI_BOUNCE_WEBHOOK_TOKEN"
+    },
+    {
+      "key": "fromAddress",
+      "value": "info@domainanda.id"
+    },
+    {
+      "key": "emailOk",
+      "value": "andi@contoh.co.id"
+    },
+    {
+      "key": "emailBounce",
+      "value": "budi@contoh.co.id"
+    },
+    {
+      "key": "emailSpam",
+      "value": "citra@contoh.co.id"
+    },
+    {
+      "key": "batchId",
+      "value": ""
+    },
+    {
+      "key": "messageIdOk",
+      "value": ""
+    },
+    {
+      "key": "messageIdBounce",
+      "value": ""
+    },
+    {
+      "key": "messageIdSpam",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Cek koneksi",
+      "item": [
+        {
+          "name": "Domain yang boleh dipakai key ini",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/domains",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "domains"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Key valid\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Ada domain\", () => pm.expect(d.length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Kirim batch",
+      "item": [
+        {
+          "name": "Buat batch (3 penerima)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Uji Postman\",\n  \"from\": \"Tim <{{fromAddress}}>\",\n  \"subject\": \"Halo {{nama}}\",\n  \"html\": \"<p>Halo {{nama}}, ini email uji.</p>\",\n  \"text\": \"Halo {{nama}}, ini email uji.\",\n  \"kind\": \"marketing\",\n  \"rate_per_minute\": 300,\n  \"recipients\": [\n    { \"email\": \"{{emailOk}}\",     \"vars\": { \"nama\": \"Andi\" } },\n    { \"email\": \"{{emailBounce}}\", \"vars\": { \"nama\": \"Budi\" } },\n    { \"email\": \"{{emailSpam}}\",   \"vars\": { \"nama\": \"Citra\" } }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"202 Accepted\", () => pm.response.to.have.status(202));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"batchId\", j.id);",
+                  "pm.test(\"3 penerima diterima\", () => pm.expect(j.accepted).to.eql(3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "console.log(JSON.stringify(pm.response.json().counts));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Daftar penerima + simpan message_id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}",
+                "recipients"
+              ]
+            },
+            "description": "Menyimpan message_id tiap penerima untuk simulasi bounce di folder 3."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const byEmail = {};",
+                  "json.data.forEach(r => byEmail[r.email] = r.message_id);",
+                  "pm.collectionVariables.set(\"messageIdOk\", byEmail[pm.collectionVariables.get(\"emailOk\")] || \"\");",
+                  "pm.collectionVariables.set(\"messageIdBounce\", byEmail[pm.collectionVariables.get(\"emailBounce\")] || \"\");",
+                  "pm.collectionVariables.set(\"messageIdSpam\", byEmail[pm.collectionVariables.get(\"emailSpam\")] || \"\");",
+                  "pm.test(\"message_id tersimpan (tunggu beberapa detik setelah kirim batch bila kosong)\", () => pm.expect(pm.collectionVariables.get(\"messageIdBounce\")).to.not.eql(\"\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hanya yang bounce",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=bounced",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}",
+                "recipients"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "bounced"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Hanya yang komplain",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}/recipients?status=complained",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}",
+                "recipients"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "complained"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Kirim ulang ke alamat yang sudah bounce (harus ditolak)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"{{fromAddress}}\",\n  \"subject\": \"Kirim ulang\",\n  \"text\": \"Halo\",\n  \"recipients\": [ { \"email\": \"{{emailBounce}}\" }, { \"email\": \"baru@contoh.co.id\" } ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test(\"Alamat bounce ditolak\", () => pm.expect(j.rejected.map(r => r.reason)).to.include(\"bounced\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kirim satu email (transaksional)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/emails",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "emails"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"{{fromAddress}}\",\n  \"to\": \"baru@contoh.co.id\",\n  \"subject\": \"Kode Anda\",\n  \"html\": \"<p>Kode: {{kode}}</p>\",\n  \"vars\": { \"kode\": \"482910\" }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Batalkan batch",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/batches/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "batches",
+                "{{batchId}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Simulasi bounce (webhook)",
+      "description": "Meniru kiriman dari Stalwart. Jalankan 'Daftar penerima + simpan message_id' dulu.",
+      "item": [
+        {
+          "name": "Hard bounce: user unknown (alamat disuppress)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"hard_bounce\",\n  \"message_id\": \"{{messageIdBounce}}\",\n  \"code\": \"5.1.1\",\n  \"reason\": \"550 5.1.1 User unknown\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bounceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"1 bounce tercatat\", () => pm.expect(pm.response.json().results.bounced).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Soft bounce (hanya dicatat)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"soft_bounce\",\n  \"message_id\": \"{{messageIdOk}}\",\n  \"code\": \"4.2.2\",\n  \"reason\": \"Mailbox full\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bounceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"soft\", () => pm.expect(pm.response.json().results.soft).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Komplain spam (alamat disuppress)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"complaint\",\n  \"message_id\": \"{{messageIdSpam}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bounceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"complained\", () => pm.expect(pm.response.json().results.complained).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Email DSN mentah (format RFC 3464)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce"
+              ]
+            },
+            "description": "Dikirim apa adanya. Hasilnya 'duplicate' bila alamat itu sudah ditandai bounce di langkah pertama.",
+            "body": {
+              "mode": "raw",
+              "raw": "Final-Recipient: rfc822; {{emailBounce}}\nAction: failed\nStatus: 5.1.1\nDiagnostic-Code: smtp; 550 5.1.1 User unknown\n\nMessage-ID: {{messageIdBounce}}\nSubject: Halo\n"
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bounceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Log event bounce terbaru",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce/events?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bounceToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Tanpa token (harus 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hooks/bounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hooks",
+                "bounce"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

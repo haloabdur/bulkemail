@@ -7,6 +7,7 @@ Tujuannya sederhana: siapa pun yang punya sistem (HR, toko online, klinik, sekol
 - **Kirim batch manual**: upload CSV atau tempel daftar. Kolom CSV otomatis jadi variabel (`{{nama}}`, `{{kode_promo}}`, …). Ada email tes, pengiriman terjadwal, dan batas kecepatan per menit.
 - **API untuk sistem lain**: satu API key per sistem, mode *live* / *test*, batas harian, dan pembatasan domain pengirim.
 - **Pengiriman terkontrol**: worker di latar belakang mengirim ke Stalwart sesuai kecepatan tiap batch. Penolakan sementara (4xx) dicoba ulang otomatis. Respons SMTP tiap penerima tercatat; batch bisa dijeda, dilanjutkan, dibatalkan, atau dikirim ulang untuk yang gagal. Laporan bisa diunduh sebagai CSV.
+- **Bounce & komplain**: webhook `/hooks/bounce` menerima kegagalan yang terjadi *setelah* Stalwart menerima pesan (JSON atau email DSN mentah). Penerima ditandai `bounced`/`complained`, dan alamat yang jelas mati otomatis disuppress. Panduan uji di Postman: [`docs/POSTMAN.md`](docs/POSTMAN.md).
 - **Unsubscribe sesuai aturan Gmail/Yahoo**: link bertanda tangan, header `List-Unsubscribe` + one-click (RFC 8058), dan daftar suppression. Email transaksional tidak terkena.
 - **Integrasi domain yang mudah**: domain dan kunci DKIM dibuat otomatis di Stalwart. BatchMail menampilkan record DNS yang perlu dipasang, lalu memverifikasi SPF/DKIM/DMARC. Record bisa dipasang **manual** (salin, atau impor file zona) atau **otomatis lewat Cloudflare**.
 
@@ -26,12 +27,13 @@ Tujuannya sederhana: siapa pun yang punya sistem (HR, toko online, klinik, sekol
 9. [Referensi konfigurasi (`.env`)](#referensi-konfigurasi-env)
 10. [API](#api)
 11. [Variabel template & unsubscribe](#variabel-template--unsubscribe)
-12. [Status batch & penerima](#status-batch--penerima)
-13. [Tips deliverability](#tips-deliverability)
-14. [Backup, update, dan troubleshooting](#backup-update-dan-troubleshooting)
-15. [Pengembangan](#pengembangan)
-16. [Batasan saat ini](#batasan-saat-ini)
-17. [Lisensi](#lisensi)
+12. [Bounce & komplain](#bounce--komplain)
+13. [Status batch & penerima](#status-batch--penerima)
+14. [Tips deliverability](#tips-deliverability)
+15. [Backup, update, dan troubleshooting](#backup-update-dan-troubleshooting)
+16. [Pengembangan](#pengembangan)
+17. [Batasan saat ini](#batasan-saat-ini)
+18. [Lisensi](#lisensi)
 
 ---
 
@@ -243,6 +245,7 @@ Aturan pengamannya (diuji di `src/cloudflare.rs`):
 | `STALWART_API_URL` | | — | Mis. `https://mail.domainanda.id/api`. |
 | `STALWART_API_TOKEN` | | — | API key Stalwart (Bearer) atau `admin:password`. |
 | `CLOUDFLARE_API_TOKEN` | | — | Token default untuk DNS otomatis. |
+| `BOUNCE_WEBHOOK_TOKEN` | | — | Rahasia untuk `POST /hooks/bounce`. Kosong = endpoint nonaktif (404). |
 | `DATABASE_URL` | | `sqlite://data/batchmail.db` | Lokasi file SQLite (folder dibuat otomatis). |
 | `BIND_ADDR` | | `0.0.0.0:8080` | Alamat HTTP. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | | — | User pertama (dibuat bila belum ada user). Password ≥10 karakter. |
@@ -314,7 +317,7 @@ Respons `202 Accepted`:
 }
 ```
 
-`rejected` berisi `{ "email", "reason" }`, dengan `reason` = `invalid_email`, `duplicate`, atau `unsubscribed`.
+`rejected` berisi `{ "email", "reason" }`, dengan `reason` = `invalid_email`, `duplicate`, `unsubscribed`, atau `bounced` (alamat pernah bounce/komplain).
 
 ### Kirim satu email
 
@@ -335,7 +338,7 @@ curl -H "Authorization: Bearer $BATCHMAIL_KEY" https://batchmail.domainanda.id/a
 {
   "id": "b_2Ky4hTq9Lm", "name": "Pengingat jadwal 26 Okt", "status": "sending",
   "kind": "marketing", "test_mode": false, "total": 2,
-  "counts": { "queued": 1, "sent": 1, "deferred": 0, "failed": 0, "skipped": 0, "cancelled": 0 },
+  "counts": { "queued": 1, "sent": 1, "deferred": 0, "failed": 0, "skipped": 0, "cancelled": 0, "bounced": 0, "complained": 0 },
   "send_at": "2026-10-26T00:00:00+00:00", "created_at": "…", "finished_at": null
 }
 ```
@@ -366,6 +369,34 @@ Key `bk_test_…` (pilih *Mode: Test* saat membuat key) memproses batch seperti 
 - Email **marketing** selalu mendapat header `List-Unsubscribe` + `List-Unsubscribe-Post` (one-click). Jika isi email tidak memuat `{{unsubscribe_url}}`, BatchMail menambahkan link "Berhenti berlangganan" di bagian bawah.
 - Penerima yang berhenti berlangganan masuk **daftar Unsubscribe** (menu *Unsubscribe*). Mereka dilewati di batch marketing berikutnya. Email **transactional** tetap terkirim.
 
+## Bounce & komplain
+
+Status `sent` hanya berarti Stalwart menerima pesan. Server penerima bisa menolaknya belakangan (alamat tidak ada, kotak penuh, diblokir). Kabar itu sampai ke BatchMail lewat webhook:
+
+```
+POST /hooks/bounce            ← dari Stalwart, atau sistem Anda
+GET  /hooks/bounce/events     ← 50 event terakhir dan keputusannya (untuk debugging)
+```
+
+Aktifkan dengan mengisi `BOUNCE_WEBHOOK_TOKEN`. Token diterima sebagai `Authorization: Bearer`, password HTTP Basic, `?token=`, atau header `X-Signature` (HMAC-SHA256 base64 dari body, kunci = token). Body boleh JSON (satu event, array, atau `{"events":[…]}`) atau **email DSN mentah** (RFC 3464).
+
+BatchMail mengenali email yang bounce lewat **Message-ID** buatannya (`<b_…>`, tersimpan per penerima), di mana pun ia muncul dalam payload. Event lalu diklasifikasikan:
+
+| Kejadian | Penerima | Alamat |
+|---|---|---|
+| Hard bounce `5.1.x` (alamat/domain tidak ada) | `bounced` | disuppress |
+| Hard bounce lain (`5.7.x` diblokir, `5.2.x` penuh, …) | `bounced` | tidak disuppress |
+| Komplain (ARF `feedback-type:` atau `"type":"complaint"`) | `complained` | disuppress |
+| Soft bounce (4.x.x, delayed) | tetap `sent` | hanya dicatat |
+
+Alamat dengan sumber `bounce`/`complaint` dilewati untuk semua jenis email (marketing dan transaksional), dan ditolak sebagai `bounced` saat membuat batch baru. Hapus dari menu *Unsubscribe* bila perlu. Format JSON netral untuk sistem Anda sendiri:
+
+```json
+{ "type": "hard_bounce", "message_id": "<b_AbCdEfGhIj.2.xxxxxxxx@domainanda.id>", "code": "5.1.1", "reason": "User unknown" }
+```
+
+`type` boleh `hard_bounce`, `soft_bounce`, atau `complaint`. Jika `message_id` tidak ada, field `email` tetap bisa men-suppress alamat untuk hard bounce `5.1.x` dan komplain. Cara menyambungkan ke Stalwart dan menguji lewat Postman: [`docs/POSTMAN.md`](docs/POSTMAN.md).
+
 ## Status batch & penerima
 
 | Batch | Arti |
@@ -384,6 +415,8 @@ Key `bk_test_…` (pilih *Mode: Test* saat membuat key) memproses batch seperti 
 | `failed` | Ditolak permanen (5xx) atau gagal 3× |
 | `skipped` | Penerima berhenti berlangganan setelah batch dibuat |
 | `cancelled` | Batch dibatalkan sebelum terkirim |
+| `bounced` | Diterima Stalwart, lalu ditolak server penerima (lihat [Bounce & komplain](#bounce--komplain)) |
+| `complained` | Penerima melaporkan sebagai spam |
 
 Jika Stalwart tidak bisa dihubungi, pengiriman otomatis berhenti sebentar. Penerima tetap di antrean dan tidak dihitung gagal.
 
@@ -447,7 +480,7 @@ Struktur kode:
 
 ## Batasan saat ini
 
-- **Bounce asinkron belum dibaca.** Penolakan yang terjadi *setelah* Stalwart menerima pesan (server penerima menolak belakangan) belum masuk ke log BatchMail. Lihat di antrean/report Stalwart. Rencana berikutnya: menerima webhook/DSN dari Stalwart.
+- **Bounce dari Stalwart belum diuji dengan Stalwart sungguhan.** Endpoint `/hooks/bounce` sudah diuji lewat simulasi dan DSN mentah, tetapi skema event webhook Stalwart belum dicocokkan. Ikuti langkah verifikasi di [`docs/POSTMAN.md`](docs/POSTMAN.md#c-menyambungkan-bounce-dari-stalwart).
 - Belum ada webhook status ke sistem Anda. Pakai `GET /batches/{id}` untuk polling.
 - Belum ada "list tersimpan" (kontak permanen). Setiap batch membawa daftarnya sendiri.
 - Satu workspace: semua user dashboard melihat semua batch, key, dan domain.

@@ -115,6 +115,8 @@ fn recipient_status(s: &str) -> (&'static str, &'static str) {
         "failed" => ("Gagal", "orange"),
         "skipped" => ("Dilewati", "gray"),
         "cancelled" => ("Dibatalkan", "gray"),
+        "bounced" => ("Bounce", "orange"),
+        "complained" => ("Komplain", "orange"),
         _ => ("—", "gray"),
     }
 }
@@ -687,6 +689,8 @@ async fn batch_detail(
         ("", "Semua"),
         ("sent", "Diterima"),
         ("failed", "Gagal"),
+        ("bounced", "Bounce"),
+        ("complained", "Komplain"),
         ("deferred", "Ditunda"),
         ("queued", "Antrean"),
         ("skipped", "Dilewati"),
@@ -738,11 +742,16 @@ async fn batch_detail(
         processed: fmt_num(c.processed()),
         total: fmt_num(b.total),
         pct_sent: c.sent as f64 * 100.0 / total,
-        pct_failed: c.failed as f64 * 100.0 / total,
+        pct_failed: (c.failed + c.bounced + c.complained) as f64 * 100.0 / total,
         pct_deferred: c.deferred as f64 * 100.0 / total,
         counts: vec![
             ("Diterima Stalwart".into(), fmt_num(c.sent), "blue"),
             ("Gagal".into(), fmt_num(c.failed), "orange"),
+            (
+                "Bounce / komplain".into(),
+                fmt_num(c.bounced + c.complained),
+                "orange",
+            ),
             ("Ditunda, dicoba ulang".into(), fmt_num(c.deferred), "gray"),
             ("Antrean".into(), fmt_num(c.queued), "light"),
             (

@@ -99,24 +99,21 @@ async fn send_one(
     attempts: i64,
 ) -> Result<()> {
     let marketing = batch.kind == "marketing";
-    if marketing {
-        let suppressed: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM suppressions WHERE email = ?)")
-                .bind(email)
-                .fetch_one(&state.db)
-                .await?;
-        if suppressed {
-            return update(
-                state,
-                rid,
-                "skipped",
-                attempts,
-                0,
-                "Dilewati: penerima sudah berhenti berlangganan",
-                None,
-            )
-            .await;
-        }
+    // Unsubscribes only stop marketing; bounced/complaining addresses stop everything.
+    let suppressed: Option<String> = sqlx::query_scalar(
+        "SELECT source FROM suppressions WHERE email = ? AND (? OR source IN ('bounce','complaint'))",
+    )
+    .bind(email)
+    .bind(marketing)
+    .fetch_optional(&state.db)
+    .await?;
+    if let Some(source) = suppressed {
+        let why = if crate::batches::is_dead_address(&source) {
+            "Dilewati: alamat pernah bounce atau komplain"
+        } else {
+            "Dilewati: penerima sudah berhenti berlangganan"
+        };
+        return update(state, rid, "skipped", attempts, 0, why, None).await;
     }
 
     let from = Mailbox::from_str(&batch.from_addr).map_err(|e| anyhow!("from tidak valid: {e}"))?;
