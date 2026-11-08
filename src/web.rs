@@ -2,7 +2,7 @@
 
 use crate::AppState;
 use crate::auth::{self, User};
-use crate::batches::{self, Batch, Kind, NewBatch, RecipientInput};
+use crate::batches::{self, Batch, Counts, Kind, NewBatch, RecipientInput};
 use crate::domains::{self, Domain};
 use crate::error::PageResult;
 use crate::mailer::Outcome;
@@ -94,14 +94,15 @@ pub(crate) fn redirect_msg(path: &str, code: &str) -> Response {
 
 // ---------- status labels ----------
 
-fn batch_status(b: &Batch, failed: i64) -> (&'static str, &'static str) {
+fn batch_status(b: &Batch, c: &Counts) -> (&'static str, &'static str) {
     match b.status.as_str() {
         "scheduled" => ("Terjadwal", "purple"),
         "queued" => ("Antre", "gray"),
         "sending" => ("Mengirim", "blue"),
         "paused" => ("Dijeda", "gray"),
         "cancelled" => ("Dibatalkan", "gray"),
-        "completed" if failed > 0 => ("Selesai · ada gagal", "orange"),
+        "completed" if c.failed > 0 => ("Selesai · ada gagal", "orange"),
+        "completed" if c.bounced + c.complained > 0 => ("Selesai · ada bounce", "orange"),
         "completed" => ("Selesai", "gray"),
         _ => ("—", "gray"),
     }
@@ -136,7 +137,7 @@ async fn batch_rows(state: &AppState, list: Vec<Batch>) -> PageResult<Vec<BatchR
     let mut rows = Vec::with_capacity(list.len());
     for b in list {
         let c = batches::counts(&state.db, &b.id).await?;
-        let (status, status_class) = batch_status(&b, c.failed);
+        let (status, status_class) = batch_status(&b, &c);
         let pct = if b.total > 0 {
             c.processed() * 100 / b.total
         } else {
@@ -650,7 +651,7 @@ async fn batch_detail(
         return Ok((StatusCode::NOT_FOUND, "Batch tidak ditemukan").into_response());
     };
     let c = batches::counts(&state.db, &b.id).await?;
-    let (status, status_class) = batch_status(&b, c.failed);
+    let (status, status_class) = batch_status(&b, &c);
     let total = b.total.max(1) as f64;
     let status_filter = q
         .status

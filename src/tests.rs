@@ -511,6 +511,31 @@ async fn bounce_webhook_updates_recipients_and_suppresses() {
         3
     );
 
+    // The dashboard flags a finished batch that has bounces.
+    auth::upsert_user(&state.db, "admin@domainanda.id", "rahasia-sekali")
+        .await
+        .unwrap();
+    let (_, headers, _) = send(
+        &router,
+        Request::post("/login")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(
+                "email=admin%40domainanda.id&password=rahasia-sekali&remember=1",
+            ))
+            .unwrap(),
+    )
+    .await;
+    let cookie = headers["set-cookie"].split(';').next().unwrap().to_string();
+    for path in ["/batches".to_string(), format!("/batches/{id}")] {
+        let req = Request::get(&path)
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let (status, _, body) = send(&router, req).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(body.contains("Selesai · ada bounce"), "{path}");
+    }
+
     // Dead addresses are rejected for new batches, marketing and transactional alike.
     let (status, _, body) = send(
         &router,
