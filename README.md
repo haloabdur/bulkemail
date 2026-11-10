@@ -58,6 +58,7 @@ Tujuannya sederhana: siapa pun yang punya sistem (HR, toko online, klinik, sekol
 - Server Linux dengan IP publik yang **boleh mengirim lewat port 25**. Banyak VPS memblokirnya secara default; minta dibuka ke penyedia VPS.
 - Hostname untuk mail server, mis. `mail.domainanda.id`, dengan record **A** ke IP server dan **PTR / reverse DNS** ke hostname yang sama (atur di panel VPS).
 - Domain pengirim yang DNS-nya bisa Anda ubah.
+- **Stalwart v0.15.x** (diuji dengan `v0.15.5`, sudah dikunci di `docker-compose.yml`). Stalwart v0.16 ke atas, termasuk v1.x, memakai format konfigurasi dan Management API baru sehingga endpoint yang dipakai BatchMail (`/api/principal`, `/api/dkim`, dll.) mengembalikan 404. Jangan pakai tag `latest`.
 - Untuk instalasi A: Docker + Docker Compose. Untuk instalasi B: Rust 1.85+ (`rustup`).
 
 ## Instalasi A — Docker Compose (Stalwart + BatchMail)

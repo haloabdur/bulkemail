@@ -6,7 +6,9 @@
 
 services:
   stalwart:
-    image: stalwartlabs/stalwart:latest
+    # Pinned: Stalwart v0.16+ / v1.x changed the config layout and the management
+    # API (/api/principal etc. return 404), which BatchMail relies on.
+    image: stalwartlabs/stalwart:v0.15.5
     container_name: stalwart
     restart: unless-stopped
     hostname: ${MAIL_HOSTNAME:-mail.domainanda.id}

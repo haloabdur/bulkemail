@@ -4,6 +4,7 @@
 //! in Stalwart, a DKIM key is generated there, and the DNS records Stalwart wants
 //! published are fetched and shown to the user.
 //!
+//! Targets Stalwart v0.15.x (v0.16+ / v1.x replaced this management API).
 //! Endpoints used (check them against your Stalwart version if a call fails):
 //!   POST /api/principal          {"type":"domain","name":...}
 //!   POST /api/dkim               {"id":null,"algorithm":...,"domain":...,"selector":null}
